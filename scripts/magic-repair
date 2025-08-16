@@ -44,6 +44,93 @@ BLUE="\033[1;34m"
 MAGENTA="\033[1;35m"
 NC="\033[0m"
 
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/config/magic-repair.conf"
+search_terms=()
+
+# Function to show usage
+show_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "OPTIONS:"
+    echo "  -s TERM    Add search term for device names (can be used multiple times)"
+    echo "  -h, --help Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -s \"Magic\" -s \"Jonas\"     # Search for devices containing 'Magic' AND 'Jonas'"
+    echo "  $0 -s \"Dell\" -s \"Tom\"        # Search for devices containing 'Dell' AND 'Tom'"
+    echo ""
+    echo "Configuration file:"
+    echo "  If no search terms are provided via -s, the script will look for"
+    echo "  a configuration file at: ${CONFIG_FILE}"
+    echo ""
+    echo "  Example configuration file content:"
+    echo "  search_terms=\"Magic Jonas\""
+    echo "  # or"
+    echo "  search_terms=\"Dell Tom\""
+}
+
+# Function to read configuration file
+read_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # Source the config file in a subshell to avoid polluting current environment
+        local config_search_terms
+        config_search_terms=$(grep '^search_terms=' "$CONFIG_FILE" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+        if [[ -n "$config_search_terms" ]]; then
+            # Split the config search terms and add to array
+            read -ra terms <<< "$config_search_terms"
+            for term in "${terms[@]}"; do
+                search_terms+=("$term")
+            done
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s)
+            if [[ -n "$2" ]]; then
+                search_terms+=("$2")
+                shift 2
+            else
+                echo -e "${RED}❌ Error:${NC} -s requires a search term"
+                exit 1
+            fi
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}❌ Error:${NC} Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+# If no search terms provided via arguments, try to read from config
+if [[ ${#search_terms[@]} -eq 0 ]]; then
+    if ! read_config; then
+        echo -e "${RED}❌ Error:${NC} No search terms provided and no valid configuration found."
+        echo ""
+        show_usage
+        exit 1
+    fi
+fi
+
+# Validate that we have search terms
+if [[ ${#search_terms[@]} -eq 0 ]]; then
+    echo -e "${RED}❌ Error:${NC} No search terms available."
+    echo ""
+    show_usage
+    exit 1
+fi
+
 # Check if blueutil is installed
 if ! command -v blueutil &> /dev/null; then
     echo -e "${RED}❌ Error:${NC} 'blueutil' not found."
@@ -109,14 +196,29 @@ restart_bluetooth() {
     sleep 3
 }
 
+# Build jq filter for search terms
+build_jq_filter() {
+    local filter_parts=()
+    for term in "${search_terms[@]}"; do
+        filter_parts+=("test(\"(?i)${term}\")")
+    done
+    # Join filter parts with ' and '
+    local jq_filter
+    jq_filter=$(printf "%s and " "${filter_parts[@]}")
+    jq_filter="${jq_filter% and }"  # Remove trailing ' and '
+    echo ".[] | select(.name | $jq_filter) | \"\(.address)|\(.name)\""
+}
+
 # Search for matching devices
 echo ""
-echo -e "${BLUE}🔍 Searching for bluetooth devices with 'Magic' and 'Jonas'...${NC}"
+search_terms_display=$(IFS=', '; echo "'${search_terms[*]}'")
+echo -e "${BLUE}🔍 Searching for bluetooth devices with ${search_terms_display}...${NC}"
 echo ""
 devices=()
+jq_filter=$(build_jq_filter)
 while IFS= read -r line; do
     devices+=("$line")
-done < <(blueutil --paired --format json | jq -r '.[] | select(.name | test("(?i)Magic") and test("(?i)Jonas")) | "\(.address)|\(.name)"')
+done < <(blueutil --paired --format json | jq -r "$jq_filter")
 
 if [[ ${#devices[@]} -eq 0 ]]; then
     echo -e "${RED}❌ No matching devices found. Please pair manually.${NC}"
@@ -173,4 +275,4 @@ for dev in "${devices[@]}"; do
     echo ""
 done
 
-echo -e "${GREEN}🎉 Successfully re-paired your magic devices.${NC}"
+echo -e "${GREEN}🎉 Successfully re-paired your bluetooth devices.${NC}"
