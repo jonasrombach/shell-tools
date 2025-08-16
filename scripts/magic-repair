@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+
+# Colors
+RED="\033[0;31m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+MAGENTA="\033[1;35m"
+NC="\033[0m"
+
+# Check if blueutil is installed
+if ! command -v blueutil &> /dev/null; then
+    echo -e "${RED}❌ Error:${NC} 'blueutil' not found."
+    echo -e "${YELLOW}Install with:${NC} brew install blueutil"
+    exit 1
+fi
+
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}❌ Error:${NC} 'jq' not found."
+    echo -e "${YELLOW}Install with:${NC} brew install jq"
+    exit 1
+fi
+
+unpair_device() {
+    local mac="$1"
+    local name="$2"
+    echo -e "${BLUE}Disconnecting ${name}...${NC}"
+    blueutil --unpair "$mac" &>/dev/null || true
+}
+
+pair_with_retries() {
+    local mac="$1"
+    local name="$2"
+    local retries=3
+    local wait_times=(2 5 10)
+
+    for attempt in $(seq 1 $retries); do
+        echo -e "\t${BLUE}🔗 Pairing – Attempt ${attempt}/${retries}${NC}"
+        sleep "${wait_times[$((attempt-1))]}"
+        if blueutil --pair "$mac" &>/dev/null; then
+            echo -e "\t${GREEN}✅ Pairing successful.${NC}"
+            return 0
+        fi
+        echo -e "\t${YELLOW}⚠️ Pairing attempt ${attempt} failed.${NC}"
+    done
+    return 1
+}
+
+connect_with_retries() {
+    local mac="$1"
+    local name="$2"
+    local retries=3
+    local wait_times=(2 5 8)
+
+    for attempt in $(seq 1 $retries); do
+        echo -e "\t${BLUE}🔗 Connecting – Attempt ${attempt}/${retries}${NC}"
+        sleep "${wait_times[$((attempt-1))]}"
+        if blueutil --connect "$mac" &>/dev/null; then
+            echo -e "\t${GREEN}✅ Connection successful.${NC}"
+            return 0
+        fi
+        echo -e "\t${YELLOW}⚠️ Connection attempt ${attempt} failed.${NC}"
+    done
+    return 1
+}
+
+restart_bluetooth() {
+    echo -e "${BLUE}🔄 Restarting bluetooth...${NC}"
+    blueutil --power 0
+    sleep 3
+    blueutil --power 1
+    sleep 3
+}
+
+# Search for matching devices
+echo ""
+echo -e "${BLUE}🔍 Searching for bluetooth devices with 'Magic' and 'Jonas'...${NC}"
+echo ""
+devices=()
+while IFS= read -r line; do
+    devices+=("$line")
+done < <(blueutil --paired --format json | jq -r '.[] | select(.name | test("(?i)Magic") and test("(?i)Jonas")) | "\(.address)|\(.name)"')
+
+if [[ ${#devices[@]} -eq 0 ]]; then
+    echo -e "${RED}❌ No matching devices found. Please pair manually.${NC}"
+    exit 1
+fi
+
+# Phase 1: Un-pair all devices in parallel
+for dev in "${devices[@]}"; do
+    mac="${dev%%|*}"
+    name="${dev##*|}"
+    unpair_device "$mac" "$name" &
+done
+wait
+echo ""
+echo -e "${GREEN}⛓️‍💥  Disconnected all matching devices.${NC}"
+echo ""
+
+# Phase 2: Pair + Connect devices one after another
+for dev in "${devices[@]}"; do
+    mac="${dev%%|*}"
+    name="${dev##*|}"
+
+    icon="⌨️"
+
+    if [[ $name == *"Trackpad"* ]]; then
+        icon="🖱️"
+    elif [[ $name == *"Mouse"* ]]; then
+        icon="🖱️"
+    fi
+
+    echo -e "${BLUE}${icon}  ${name}${NC}"
+
+    if ! pair_with_retries "$mac" "$name"; then
+        echo -e "${MAGENTA}❓ Pairing of ${name} failed. Restart Bluetooth? (y/n)${NC}"
+        echo -e "${YELLOW}💡 Tipp: Turn your devices off and on again before executing.${NC}"
+        read -r answer
+        if [[ "$answer" == "y" ]]; then
+            restart_bluetooth
+            if ! pair_with_retries "$mac" "$name"; then
+                echo -e "${RED}❌ Pairing of ${name} failed finally.${NC}"
+                echo ""
+                continue
+            fi
+        else
+            echo -e "${YELLOW}⚠️ Restarting bluetooth failed.${NC}"
+            echo ""
+            continue
+        fi
+    fi
+
+    if ! connect_with_retries "$mac" "$name"; then
+        echo -e "\t${RED}❌ Connecting ${name} failed.${NC}"
+    fi
+    echo ""
+done
+
+echo -e "${GREEN}🎉 Successfully re-paired your magic devices.${NC}"
