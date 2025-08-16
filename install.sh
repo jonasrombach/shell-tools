@@ -47,7 +47,8 @@ install_to_dir() {
     # Install each script
     for script in "$SCRIPTS_DIR"/*; do
         if [[ -f "$script" && -x "$script" ]]; then
-            local script_name="$(basename "$script")"
+            local script_name
+            script_name="$(basename "$script")"
             local target_path="$target_dir/$script_name"
             
             # Remove existing link/file if it exists
@@ -107,7 +108,7 @@ prompt_for_location() {
     echo ""
     
     while true; do
-        read -p "Enter your choice (1-4): " choice
+        read -r -p "Enter your choice (1-4): " choice
         case $choice in
             1)
                 install_to_dir "$HOME/.local/bin"
@@ -123,7 +124,7 @@ prompt_for_location() {
                 return $?
                 ;;
             3)
-                read -p "Enter custom directory path: " custom_dir
+                read -r -p "Enter custom directory path: " custom_dir
                 if [[ -n "$custom_dir" ]]; then
                     install_to_dir "$custom_dir"
                     return $?

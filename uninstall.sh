@@ -31,12 +31,14 @@ remove_from_dir() {
     # Remove each script that was installed
     for script in "$SCRIPTS_DIR"/*; do
         if [[ -f "$script" && -x "$script" ]]; then
-            local script_name="$(basename "$script")"
+            local script_name
+            script_name="$(basename "$script")"
             local target_path="$target_dir/$script_name"
             
             if [[ -L "$target_path" ]]; then
                 # Check if it's a symlink to our script
-                local link_target="$(readlink "$target_path")"
+                local link_target
+                link_target="$(readlink "$target_path")"
                 if [[ "$link_target" == "$script" ]]; then
                     rm "$target_path"
                     echo -e "${GREEN}✅ Removed: $script_name${NC}"
@@ -88,7 +90,7 @@ prompt_for_location() {
     echo ""
     
     while true; do
-        read -p "Enter your choice (1-5): " choice
+        read -r -p "Enter your choice (1-5): " choice
         case $choice in
             1)
                 remove_from_dir "$HOME/.local/bin"
@@ -114,7 +116,7 @@ prompt_for_location() {
                 return $?
                 ;;
             4)
-                read -p "Enter custom directory path: " custom_dir
+                read -r -p "Enter custom directory path: " custom_dir
                 if [[ -n "$custom_dir" ]]; then
                     remove_from_dir "$custom_dir"
                     return $?
