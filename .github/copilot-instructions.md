@@ -33,7 +33,7 @@ The primary goal is to create terminal tools that:
 **Solution**: A bash script that automates this entire process with a single command: `magic-repair`
 
 **Key Features**:
-- Searches for paired Magic devices containing "Magic" and "Jonas" in the name
+- Searches for paired Magic devices containing "Magic" and a user-configurable name (e.g., "Jonas") in the name
 - Unpairs all matching devices in parallel for efficiency
 - Re-pairs and connects devices sequentially with retry logic
 - Provides clear visual feedback with colors and emojis
