@@ -10,7 +10,7 @@ NC="\033[0m"
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/../config/magic-repair.conf"
+CONFIG_FILE="${SCRIPT_DIR}/config/magic-repair.conf"
 search_terms=()
 
 # Function to show usage
