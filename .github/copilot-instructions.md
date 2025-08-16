@@ -25,9 +25,9 @@ The primary goal is to create terminal tools that:
 - **Handle errors gracefully** with helpful messages
 - **Follow consistent patterns** across all tools
 
-## Existing Tools
+## Example Tool
 
-### magic-repair
+### magic-repair (Example Implementation)
 **Problem**: Apple Magic devices (Keyboard, Trackpad, Mouse) don't support multidevice connection. When you pair a Magic device with Device A and then with Device B, it stops working on Device A. To fix this, users must manually disconnect all devices through Bluetooth settings, wait for them to appear for pairing, and reconnect them.
 
 **Solution**: A bash script that automates this entire process with a single command: `magic-repair`
@@ -48,7 +48,7 @@ All scripts should follow this pattern:
    ```bash
    #!/usr/bin/env bash
    
-   # Colors for output
+   # Constants needed for the script
    RED="\033[0;31m"
    GREEN="\033[1;32m"
    YELLOW="\033[1;33m"
@@ -129,10 +129,6 @@ chmod +x scripts/script-name
 ```
 
 ## Dependencies
-
-Current tools depend on:
-- `blueutil` - Bluetooth management (installable via Homebrew)
-- `jq` - JSON processing (installable via Homebrew)
 
 When adding new dependencies:
 - Prefer tools available via Homebrew
