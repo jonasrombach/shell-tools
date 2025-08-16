@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Terminal Tools Uninstallation Script
-# This script removes terminal-tools scripts from your system
+# This script removes the terminal-tools scripts directory from your PATH
 
 set -e
 
@@ -16,47 +16,66 @@ NC="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 
-# Function to remove scripts from a directory
-remove_from_dir() {
-    local target_dir="$1"
-    local removed_count=0
+# Function to detect shell and get profile file
+get_shell_profile() {
+    local shell_name
+    shell_name="$(basename "$SHELL")"
     
-    echo -e "${BLUE}🗑️  Removing scripts from $target_dir...${NC}"
+    case "$shell_name" in
+        bash)
+            if [[ -f "$HOME/.bashrc" ]]; then
+                echo "$HOME/.bashrc"
+            elif [[ -f "$HOME/.bash_profile" ]]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        fish)
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+# Function to remove PATH from shell profile
+remove_from_path() {
+    local shell_profile
+    shell_profile="$(get_shell_profile)"
     
-    if [[ ! -d "$target_dir" ]]; then
-        echo -e "${YELLOW}⚠️  Directory $target_dir does not exist${NC}"
+    echo -e "${BLUE}🗑️  Removing scripts directory from PATH...${NC}"
+    
+    if [[ ! -f "$shell_profile" ]]; then
+        echo -e "${YELLOW}ℹ️  Profile file $shell_profile does not exist${NC}"
         return 0
     fi
     
-    # Remove each script that was installed
-    for script in "$SCRIPTS_DIR"/*; do
-        if [[ -f "$script" && -x "$script" ]]; then
-            local script_name
-            script_name="$(basename "$script")"
-            local target_path="$target_dir/$script_name"
-            
-            if [[ -L "$target_path" ]]; then
-                # Check if it's a symlink to our script
-                local link_target
-                link_target="$(readlink "$target_path")"
-                if [[ "$link_target" == "$script" ]]; then
-                    rm "$target_path"
-                    echo -e "${GREEN}✅ Removed: $script_name${NC}"
-                    removed_count=$((removed_count + 1))
-                else
-                    echo -e "${YELLOW}⚠️  Skipped: $script_name (not linked to this repository)${NC}"
-                fi
-            elif [[ -f "$target_path" ]]; then
-                echo -e "${YELLOW}⚠️  Found: $script_name (not a symlink, manual removal required)${NC}"
-            fi
-        fi
-    done
-    
-    if [[ $removed_count -eq 0 ]]; then
-        echo -e "${YELLOW}ℹ️  No terminal-tools scripts found in $target_dir${NC}"
-    else
-        echo -e "${GREEN}🎉 Successfully removed $removed_count script(s)${NC}"
+    # Check if the PATH export exists
+    if ! grep -q "export PATH.*$SCRIPTS_DIR" "$shell_profile"; then
+        echo -e "${YELLOW}ℹ️  No terminal-tools PATH entry found in $shell_profile${NC}"
+        return 0
     fi
+    
+    # Create a backup of the profile
+    cp "$shell_profile" "$shell_profile.backup.$(date +%s)"
+    echo -e "${BLUE}📋 Created backup: $shell_profile.backup.$(date +%s)${NC}"
+    
+    # Remove the terminal-tools lines
+    # Remove the comment line and the export line
+    sed -i.tmp '/# Added by terminal-tools install script/,+1d' "$shell_profile"
+    rm "$shell_profile.tmp" 2>/dev/null || true
+    
+    # Also remove any standalone export lines (in case comment was removed manually)
+    sed -i.tmp "\|export PATH.*$SCRIPTS_DIR|d" "$shell_profile"
+    rm "$shell_profile.tmp" 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Removed terminal-tools from PATH in $shell_profile${NC}"
+    echo -e "${YELLOW}💡 Restart your terminal or run: source $shell_profile${NC}"
     
     return 0
 }
@@ -67,92 +86,13 @@ show_usage() {
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
+    echo "This script removes the terminal-tools scripts directory from your PATH."
+    echo ""
     echo "Options:"
-    echo "  --user      Remove from ~/.local/bin"
-    echo "  --system    Remove from /usr/local/bin (requires sudo)"
-    echo "  --dir DIR   Remove from custom directory DIR"
-    echo "  --all       Remove from common installation directories"
     echo "  --help      Show this help message"
     echo ""
-    echo "If no option is specified, the script will prompt for removal location."
-}
-
-# Function to prompt for removal location
-prompt_for_location() {
-    echo -e "${BLUE}🗑️  Terminal Tools Uninstallation${NC}"
-    echo ""
-    echo "Choose removal location:"
-    echo "1) ~/.local/bin (user-specific)"
-    echo "2) /usr/local/bin (system-wide, requires sudo)"
-    echo "3) All common locations"
-    echo "4) Custom directory"
-    echo "5) Cancel uninstallation"
-    echo ""
-    
-    while true; do
-        read -r -p "Enter your choice (1-5): " choice
-        case $choice in
-            1)
-                remove_from_dir "$HOME/.local/bin"
-                return $?
-                ;;
-            2)
-                if [[ $EUID -eq 0 ]]; then
-                    remove_from_dir "/usr/local/bin"
-                else
-                    echo -e "${YELLOW}🔐 Removing from /usr/local/bin requires sudo...${NC}"
-                    sudo "$0" --system
-                fi
-                return $?
-                ;;
-            3)
-                remove_from_dir "$HOME/.local/bin"
-                if [[ $EUID -eq 0 ]]; then
-                    remove_from_dir "/usr/local/bin"
-                else
-                    echo -e "${YELLOW}🔐 Checking /usr/local/bin requires sudo...${NC}"
-                    sudo "$0" --system
-                fi
-                return $?
-                ;;
-            4)
-                read -r -p "Enter custom directory path: " custom_dir
-                if [[ -n "$custom_dir" ]]; then
-                    remove_from_dir "$custom_dir"
-                    return $?
-                else
-                    echo -e "${RED}❌ Invalid directory${NC}"
-                fi
-                ;;
-            5)
-                echo -e "${YELLOW}Uninstallation cancelled${NC}"
-                return 1
-                ;;
-            *)
-                echo -e "${RED}Invalid choice. Please enter 1, 2, 3, 4, or 5.${NC}"
-                ;;
-        esac
-    done
-}
-
-# Function to remove from all common locations
-remove_from_all() {
-    echo -e "${BLUE}🗑️  Removing from all common locations...${NC}"
-    
-    # User directory
-    if [[ -d "$HOME/.local/bin" ]]; then
-        remove_from_dir "$HOME/.local/bin"
-    fi
-    
-    # System directory (requires sudo if not root)
-    if [[ -d "/usr/local/bin" ]]; then
-        if [[ $EUID -eq 0 ]]; then
-            remove_from_dir "/usr/local/bin"
-        else
-            echo -e "${YELLOW}🔐 Checking /usr/local/bin requires sudo...${NC}"
-            sudo "$0" --system
-        fi
-    fi
+    echo "The script will automatically detect your shell and remove the PATH entry"
+    echo "from the appropriate profile file (.bashrc, .zshrc, etc.)."
 }
 
 # Main uninstallation logic
@@ -163,24 +103,12 @@ main() {
             show_usage
             exit 0
             ;;
-        --user)
-            remove_from_dir "$HOME/.local/bin"
-            ;;
-        --system)
-            remove_from_dir "/usr/local/bin"
-            ;;
-        --dir)
-            if [[ -z "${2:-}" ]]; then
-                echo -e "${RED}❌ Error:${NC} --dir requires a directory argument"
-                exit 1
-            fi
-            remove_from_dir "$2"
-            ;;
-        --all)
-            remove_from_all
-            ;;
         "")
-            prompt_for_location
+            echo -e "${BLUE}🗑️  Terminal Tools Uninstallation${NC}"
+            echo ""
+            echo "This will remove the scripts directory from your PATH."
+            echo ""
+            remove_from_path
             ;;
         *)
             echo -e "${RED}❌ Error:${NC} Unknown option: $1"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # Terminal Tools Installation Script
-# This script installs terminal-tools scripts to your system
+# This script makes terminal-tools scripts accessible from the command line
+# by adding the scripts directory to your PATH
 
 set -e
 
@@ -31,52 +32,80 @@ is_in_path() {
     esac
 }
 
-# Function to install scripts to a directory
-install_to_dir() {
-    local target_dir="$1"
-    local created_links=()
+# Function to detect shell and get profile file
+get_shell_profile() {
+    local shell_name
+    shell_name="$(basename "$SHELL")"
     
-    echo -e "${BLUE}📦 Installing scripts to $target_dir...${NC}"
+    case "$shell_name" in
+        bash)
+            if [[ -f "$HOME/.bashrc" ]]; then
+                echo "$HOME/.bashrc"
+            elif [[ -f "$HOME/.bash_profile" ]]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        fish)
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+# Function to add PATH to shell profile
+add_to_path() {
+    local shell_profile
+    shell_profile="$(get_shell_profile)"
+    local path_line="export PATH=\"$SCRIPTS_DIR:\$PATH\""
     
-    # Create target directory if it doesn't exist
-    if [[ ! -d "$target_dir" ]]; then
-        mkdir -p "$target_dir"
-        echo -e "${YELLOW}📁 Created directory: $target_dir${NC}"
+    echo -e "${BLUE}📦 Adding scripts directory to PATH...${NC}"
+    
+    # Check if already in PATH
+    if is_in_path "$SCRIPTS_DIR"; then
+        echo -e "${GREEN}✅ Scripts directory is already in PATH${NC}"
+        return 0
     fi
     
-    # Install each script
+    # Check if the line already exists in the profile
+    if [[ -f "$shell_profile" ]] && grep -q "export PATH.*$SCRIPTS_DIR" "$shell_profile"; then
+        echo -e "${GREEN}✅ PATH export already exists in $shell_profile${NC}"
+        echo -e "${YELLOW}💡 Restart your terminal or run: source $shell_profile${NC}"
+        return 0
+    fi
+    
+    # Create directory for profile if it doesn't exist (for fish)
+    local profile_dir
+    profile_dir="$(dirname "$shell_profile")"
+    if [[ ! -d "$profile_dir" ]]; then
+        mkdir -p "$profile_dir"
+    fi
+    
+    # Add the export line to the profile
+    {
+        echo ""
+        echo "# Added by terminal-tools install script"
+        echo "$path_line"
+    } >> "$shell_profile"
+    
+    echo -e "${GREEN}✅ Added scripts directory to PATH in $shell_profile${NC}"
+    echo -e "${YELLOW}💡 Restart your terminal or run: source $shell_profile${NC}"
+    
+    # List available scripts
+    echo -e "${BLUE}📋 Available scripts:${NC}"
     for script in "$SCRIPTS_DIR"/*; do
         if [[ -f "$script" && -x "$script" ]]; then
             local script_name
             script_name="$(basename "$script")"
-            local target_path="$target_dir/$script_name"
-            
-            # Remove existing link/file if it exists
-            if [[ -e "$target_path" ]]; then
-                rm "$target_path"
-                echo -e "${YELLOW}🔄 Replaced existing: $script_name${NC}"
-            fi
-            
-            # Create symlink
-            ln -s "$script" "$target_path"
-            created_links+=("$target_path")
-            echo -e "${GREEN}✅ Installed: $script_name${NC}"
+            echo -e "${GREEN}  ✅ $script_name${NC}"
         fi
     done
-    
-    if [[ ${#created_links[@]} -eq 0 ]]; then
-        echo -e "${YELLOW}⚠️  No executable scripts found to install${NC}"
-        return 1
-    fi
-    
-    echo -e "${GREEN}🎉 Successfully installed ${#created_links[@]} script(s)${NC}"
-    
-    # Check if target directory is in PATH
-    if ! is_in_path "$target_dir"; then
-        echo -e "${YELLOW}⚠️  Warning: $target_dir is not in your PATH${NC}"
-        echo -e "${YELLOW}💡 Add this line to your shell profile (.bashrc, .zshrc, etc.):${NC}"
-        echo -e "${BLUE}export PATH=\"$target_dir:\$PATH\"${NC}"
-    fi
     
     return 0
 }
@@ -87,60 +116,14 @@ show_usage() {
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
+    echo "This script adds the terminal-tools scripts directory to your PATH,"
+    echo "making all scripts accessible from the command line without copying them."
+    echo ""
     echo "Options:"
-    echo "  --user      Install to ~/.local/bin (user-specific)"
-    echo "  --system    Install to /usr/local/bin (system-wide, requires sudo)"
-    echo "  --dir DIR   Install to custom directory DIR"
     echo "  --help      Show this help message"
     echo ""
-    echo "If no option is specified, the script will prompt for installation location."
-}
-
-# Function to prompt for installation location
-prompt_for_location() {
-    echo -e "${BLUE}🚀 Terminal Tools Installation${NC}"
-    echo ""
-    echo "Choose installation location:"
-    echo "1) ~/.local/bin (user-specific, recommended)"
-    echo "2) /usr/local/bin (system-wide, requires sudo)"
-    echo "3) Custom directory"
-    echo "4) Cancel installation"
-    echo ""
-    
-    while true; do
-        read -r -p "Enter your choice (1-4): " choice
-        case $choice in
-            1)
-                install_to_dir "$HOME/.local/bin"
-                return $?
-                ;;
-            2)
-                if [[ $EUID -eq 0 ]]; then
-                    install_to_dir "/usr/local/bin"
-                else
-                    echo -e "${YELLOW}🔐 Installing to /usr/local/bin requires sudo...${NC}"
-                    sudo "$0" --system
-                fi
-                return $?
-                ;;
-            3)
-                read -r -p "Enter custom directory path: " custom_dir
-                if [[ -n "$custom_dir" ]]; then
-                    install_to_dir "$custom_dir"
-                    return $?
-                else
-                    echo -e "${RED}❌ Invalid directory${NC}"
-                fi
-                ;;
-            4)
-                echo -e "${YELLOW}Installation cancelled${NC}"
-                return 1
-                ;;
-            *)
-                echo -e "${RED}Invalid choice. Please enter 1, 2, 3, or 4.${NC}"
-                ;;
-        esac
-    done
+    echo "The script will automatically detect your shell and update the appropriate"
+    echo "profile file (.bashrc, .zshrc, etc.) to include the scripts directory in PATH."
 }
 
 # Main installation logic
@@ -151,21 +134,13 @@ main() {
             show_usage
             exit 0
             ;;
-        --user)
-            install_to_dir "$HOME/.local/bin"
-            ;;
-        --system)
-            install_to_dir "/usr/local/bin"
-            ;;
-        --dir)
-            if [[ -z "${2:-}" ]]; then
-                echo -e "${RED}❌ Error:${NC} --dir requires a directory argument"
-                exit 1
-            fi
-            install_to_dir "$2"
-            ;;
         "")
-            prompt_for_location
+            echo -e "${BLUE}🚀 Terminal Tools Installation${NC}"
+            echo ""
+            echo "This will add the scripts directory to your PATH, making all"
+            echo "terminal-tools scripts accessible from anywhere in your terminal."
+            echo ""
+            add_to_path
             ;;
         *)
             echo -e "${RED}❌ Error:${NC} Unknown option: $1"

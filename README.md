@@ -9,12 +9,18 @@ Tools that make life easier.
 git clone https://github.com/jonasrombach/terminal-tools.git
 cd terminal-tools
 
-# Install to ~/.local/bin (recommended)
-./install.sh --user
-
-# Or install system-wide (requires sudo)
-./install.sh --system
+# Install (adds scripts directory to PATH)
+./install.sh
 ```
+
+### How It Works
+
+The installation script adds the repository's `scripts` directory to your PATH by modifying your shell profile (`.bashrc`, `.zshrc`, etc.). This means:
+
+- Scripts remain in the repository directory
+- No files are copied or symlinked elsewhere
+- Updates via `git pull` immediately affect your installed tools
+- Easy to uninstall by removing the PATH entry
 
 ### Installation Options
 
@@ -22,30 +28,26 @@ cd terminal-tools
 ```bash
 ./install.sh
 ```
-The script will prompt you to choose an installation location.
+The script will automatically detect your shell and add the scripts directory to your PATH.
 
 #### Command Line Options
 ```bash
-./install.sh --user      # Install to ~/.local/bin (user-specific)
-./install.sh --system    # Install to /usr/local/bin (system-wide, requires sudo)
-./install.sh --dir /path # Install to custom directory
-./install.sh --help      # Show help
+./install.sh          # Interactive installation
+./install.sh --help   # Show help
 ```
 
 ### Updating
-Since the installation uses symlinks, updating is simple:
+Since scripts remain in the repository, updating is simple:
 ```bash
 cd terminal-tools
 git pull origin main
-# Scripts are automatically updated via symlinks
+# Scripts are immediately updated, no reinstallation needed
 ```
 
 ### Uninstallation
 ```bash
-./uninstall.sh --user    # Remove from ~/.local/bin
-./uninstall.sh --system  # Remove from /usr/local/bin (requires sudo)
-./uninstall.sh --all     # Remove from all common locations
-./uninstall.sh --help    # Show help
+./uninstall.sh        # Remove scripts directory from PATH
+./uninstall.sh --help # Show help
 ```
 
 ## Available Tools
@@ -64,6 +66,7 @@ magic-repair
 
 ## Notes
 
-- After installation, make sure your installation directory is in your PATH
-- The installation uses symlinks, so updates to the repository automatically update the installed scripts
-- If you move or delete the repository directory, you'll need to reinstall the scripts
+- The installation modifies your shell profile to add the scripts directory to PATH
+- Scripts remain in the repository directory and are not copied elsewhere
+- Updates to the repository immediately affect your installed tools
+- If you move or delete the repository directory, remove it from PATH using `./uninstall.sh` first
