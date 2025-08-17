@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Terminal Tools Installation Script
-# This script makes terminal-tools scripts accessible from the command line
+# Shell Tools Installation Script
+# This script makes shell-tools scripts accessible from the command line
 # by adding the scripts directory to your PATH
 
 set -e
@@ -90,7 +90,7 @@ add_to_path() {
     # Add the export line to the profile
     {
         echo ""
-        echo "# Added by terminal-tools install script"
+        echo "# Added by shell-tools install script"
         echo "$path_line"
     } >> "$shell_profile"
     
@@ -112,11 +112,11 @@ add_to_path() {
 
 # Function to show usage
 show_usage() {
-    echo "Terminal Tools Installation Script"
+    echo "Shell Tools Installation Script"
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "This script adds the terminal-tools scripts directory to your PATH,"
+    echo "This script adds the shell-tools scripts directory to your PATH,"
     echo "making all scripts accessible from the command line without copying them."
     echo ""
     echo "Options:"
@@ -135,10 +135,10 @@ main() {
             exit 0
             ;;
         "")
-            echo -e "${BLUE}🚀 Terminal Tools Installation${NC}"
+            echo -e "${BLUE}🚀 Shell Tools Installation${NC}"
             echo ""
             echo "This will add the scripts directory to your PATH, making all"
-            echo "terminal-tools scripts accessible from anywhere in your terminal."
+            echo "shell-tools scripts accessible from anywhere in your terminal."
             echo ""
             add_to_path
             ;;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Terminal Tools Uninstallation Script
-# This script removes the terminal-tools scripts directory from your PATH
+# Shell Tools Uninstallation Script
+# This script removes the shell-tools scripts directory from your PATH
 
 set -e
 
@@ -57,7 +57,7 @@ remove_from_path() {
     
     # Check if the PATH export exists
     if ! grep -q "export PATH.*$SCRIPTS_DIR" "$shell_profile"; then
-        echo -e "${YELLOW}ℹ️  No terminal-tools PATH entry found in $shell_profile${NC}"
+        echo -e "${YELLOW}ℹ️  No shell-tools PATH entry found in $shell_profile${NC}"
         return 0
     fi
     
@@ -65,16 +65,16 @@ remove_from_path() {
     cp "$shell_profile" "$shell_profile.backup.$(date +%s)"
     echo -e "${BLUE}📋 Created backup: $shell_profile.backup.$(date +%s)${NC}"
     
-    # Remove the terminal-tools lines
+    # Remove the shell-tools lines
     # Remove the comment line and the export line
-    sed -i.tmp '/# Added by terminal-tools install script/,+1d' "$shell_profile"
+    sed -i.tmp '/# Added by shell-tools install script/,+1d' "$shell_profile"
     rm "$shell_profile.tmp" 2>/dev/null || true
     
     # Also remove any standalone export lines (in case comment was removed manually)
     sed -i.tmp "\|export PATH.*$SCRIPTS_DIR|d" "$shell_profile"
     rm "$shell_profile.tmp" 2>/dev/null || true
     
-    echo -e "${GREEN}✅ Removed terminal-tools from PATH in $shell_profile${NC}"
+    echo -e "${GREEN}✅ Removed shell-tools from PATH in $shell_profile${NC}"
     echo -e "${YELLOW}💡 Restart your terminal or run: source $shell_profile${NC}"
     
     return 0
@@ -82,11 +82,11 @@ remove_from_path() {
 
 # Function to show usage
 show_usage() {
-    echo "Terminal Tools Uninstallation Script"
+    echo "Shell Tools Uninstallation Script"
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "This script removes the terminal-tools scripts directory from your PATH."
+    echo "This script removes the shell-tools scripts directory from your PATH."
     echo ""
     echo "Options:"
     echo "  --help      Show this help message"
@@ -104,7 +104,7 @@ main() {
             exit 0
             ;;
         "")
-            echo -e "${BLUE}🗑️  Terminal Tools Uninstallation${NC}"
+            echo -e "${BLUE}🗑️  Shell Tools Uninstallation${NC}"
             echo ""
             echo "This will remove the scripts directory from your PATH."
             echo ""

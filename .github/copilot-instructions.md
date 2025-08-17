@@ -1,4 +1,4 @@
-# Copilot Instructions for terminal-tools
+# Copilot Instructions for shell-tools
 
 ## Repository Overview
 
@@ -7,7 +7,7 @@ This repository contains a collection of macOS terminal tools designed to automa
 ## Repository Structure
 
 ```
-terminal-tools/
+shell-tools/
 ├── README.md                    # Brief project description
 ├── LICENSE                      # Apache 2.0 license
 ├── scripts/                     # All terminal tools/scripts
