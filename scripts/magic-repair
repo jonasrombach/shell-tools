@@ -2,7 +2,7 @@
 
 # magic-repair - Repair Apple Magic device Bluetooth connections
 # Version: 1.0.0
-# Repository: https://github.com/jonasrombach/terminal-tools
+# Repository: https://github.com/jonasrombach/shell-tools
 
 # Handle command line arguments
 case "${1:-}" in
@@ -25,8 +25,8 @@ case "${1:-}" in
         ;;
     --version|-v)
         echo "magic-repair version 1.0.0"
-        echo "Part of terminal-tools"
-        echo "Repository: https://github.com/jonasrombach/terminal-tools"
+        echo "Part of shell-tools"
+        echo "Repository: https://github.com/jonasrombach/shell-tools"
         exit 0
         ;;
     -*)
