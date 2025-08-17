@@ -1,4 +1,4 @@
-# terminal-tools
+# shell-tools
 Tools that make life easier.
 
 ## Installation
@@ -6,8 +6,8 @@ Tools that make life easier.
 ### Quick Install
 ```bash
 # Clone the repository
-git clone https://github.com/jonasrombach/terminal-tools.git
-cd terminal-tools
+git clone https://github.com/jonasrombach/shell-tools.git
+cd shell-tools
 
 # Install (adds scripts directory to PATH)
 ./install.sh
@@ -39,7 +39,7 @@ The script will automatically detect your shell and add the scripts directory to
 ### Updating
 Since scripts remain in the repository, updating is simple:
 ```bash
-cd terminal-tools
+cd shell-tools
 git pull origin main
 # Scripts are immediately updated, no reinstallation needed
 ```
