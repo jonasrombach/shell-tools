@@ -1,5 +1,41 @@
 #!/usr/bin/env bash
 
+# magic-repair - Repair Apple Magic device Bluetooth connections
+# Version: 1.0.0
+# Repository: https://github.com/jonasrombach/terminal-tools
+
+# Handle command line arguments
+case "${1:-}" in
+    --help|-h)
+        echo "magic-repair - Repair Apple Magic device Bluetooth connections"
+        echo ""
+        echo "Usage: magic-repair [OPTIONS]"
+        echo ""
+        echo "Options:"
+        echo "  --help, -h     Show this help message"
+        echo "  --version, -v  Show version information"
+        echo ""
+        echo "Dependencies:"
+        echo "  - blueutil (install with: brew install blueutil)"
+        echo "  - jq (install with: brew install jq)"
+        echo ""
+        echo "This tool searches for Magic devices and attempts to repair"
+        echo "their Bluetooth connections by unpairing and re-pairing them."
+        exit 0
+        ;;
+    --version|-v)
+        echo "magic-repair version 1.0.0"
+        echo "Part of terminal-tools"
+        echo "Repository: https://github.com/jonasrombach/terminal-tools"
+        exit 0
+        ;;
+    -*)
+        echo "Unknown option: $1"
+        echo "Use --help for usage information."
+        exit 1
+        ;;
+esac
+
 # Colors
 RED="\033[0;31m"
 GREEN="\033[1;32m"
