@@ -53,16 +53,47 @@ git pull origin main
 ## Available Tools
 
 ### magic-repair
-A tool to repair Apple Magic device Bluetooth connections.
+A tool to repair Apple Magic device Bluetooth connections. This tool searches for Bluetooth devices matching specified search terms and attempts to repair their connections by unpairing and re-pairing them.
 
 **Dependencies:**
 - `blueutil` (install with `brew install blueutil`)
 - `jq` (install with `brew install jq`)
 
 **Usage:**
+
+Basic usage with configuration file:
 ```bash
 magic-repair
 ```
+
+Advanced usage with command-line options:
+```bash
+# Search for devices containing specific terms
+magic-repair -s "Magic" -s "Jonas"
+
+# Search for different device types
+magic-repair -s "Dell" -s "Tom"
+```
+
+**Configuration:**
+
+If no search terms are provided via command-line options, the script will look for a configuration file at `scripts/config/magic-repair.conf`.
+
+Example configuration file content:
+```bash
+# Search for Apple Magic devices belonging to Jonas
+search_terms="Magic Jonas"
+
+# Or search for Dell devices belonging to Tom
+# search_terms="Dell Tom"
+```
+
+**Options:**
+- `-s TERM` - Add search term for device names (can be used multiple times)
+- `-h, --help` - Show help message
+- `-v, --version` - Show version information
+
+The script will search for devices that contain ALL of the specified search terms in their names.
 
 ## Notes
 

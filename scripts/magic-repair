@@ -6,33 +6,11 @@
 
 # Handle command line arguments
 case "${1:-}" in
-    --help|-h)
-        echo "magic-repair - Repair Apple Magic device Bluetooth connections"
-        echo ""
-        echo "Usage: magic-repair [OPTIONS]"
-        echo ""
-        echo "Options:"
-        echo "  --help, -h     Show this help message"
-        echo "  --version, -v  Show version information"
-        echo ""
-        echo "Dependencies:"
-        echo "  - blueutil (install with: brew install blueutil)"
-        echo "  - jq (install with: brew install jq)"
-        echo ""
-        echo "This tool searches for Magic devices and attempts to repair"
-        echo "their Bluetooth connections by unpairing and re-pairing them."
-        exit 0
-        ;;
     --version|-v)
         echo "magic-repair version 1.0.0"
         echo "Part of shell-tools"
         echo "Repository: https://github.com/jonasrombach/shell-tools"
         exit 0
-        ;;
-    -*)
-        echo "Unknown option: $1"
-        echo "Use --help for usage information."
-        exit 1
         ;;
 esac
 
@@ -51,11 +29,18 @@ search_terms=()
 
 # Function to show usage
 show_usage() {
+    echo "magic-repair - Repair Apple Magic device Bluetooth connections"
+    echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "OPTIONS:"
-    echo "  -s TERM    Add search term for device names (can be used multiple times)"
-    echo "  -h, --help Show this help message"
+    echo "  -s TERM        Add search term for device names (can be used multiple times)"
+    echo "  -h, --help     Show this help message"
+    echo "  -v, --version  Show version information"
+    echo ""
+    echo "Dependencies:"
+    echo "  - blueutil (install with: brew install blueutil)"
+    echo "  - jq (install with: brew install jq)"
     echo ""
     echo "Examples:"
     echo "  $0 -s \"Magic\" -s \"Jonas\"     # Search for devices containing 'Magic' AND 'Jonas'"
@@ -69,6 +54,9 @@ show_usage() {
     echo "  search_terms=\"Magic Jonas\""
     echo "  # or"
     echo "  search_terms=\"Dell Tom\""
+    echo ""
+    echo "This tool searches for Bluetooth devices matching the search terms and"
+    echo "attempts to repair their connections by unpairing and re-pairing them."
 }
 
 # Function to read configuration file
@@ -103,6 +91,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             show_usage
+            exit 0
+            ;;
+        -v|--version)
+            echo "magic-repair version 1.0.0"
+            echo "Part of shell-tools"
+            echo "Repository: https://github.com/jonasrombach/shell-tools"
             exit 0
             ;;
         *)
