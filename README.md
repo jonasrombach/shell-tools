@@ -1,5 +1,5 @@
 # shell-tools
-Tools that make life easier.
+MacOS specific tools that make life easier.
 
 ## Installation
 
