@@ -24,17 +24,12 @@ The installation script adds the repository's `scripts` directory to your PATH b
 
 ### Installation Options
 
-#### Interactive Installation
 ```bash
-./install.sh
-```
-The script will automatically detect your shell and add the scripts directory to your PATH.
-
-#### Command Line Options
-```bash
-./install.sh          # Interactive installation
+./install.sh          # Install by adding scripts directory to PATH
 ./install.sh --help   # Show help
 ```
+
+The script will automatically detect your shell and add the scripts directory to your PATH.
 
 ### Updating
 Since scripts remain in the repository, updating is simple:
