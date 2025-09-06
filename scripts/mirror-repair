@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+# mirror-repair - Patch eligibility.plist for iPhone mirroring
+# Version: 1.0.0
+# Repository: https://github.com/jonasrombach/shell-tools
+
+# Handle command line arguments
+case "${1:-}" in
+    --help|-h)
+        echo -e "\033[1;34m🔄 mirror-repair - Patch eligibility.plist for iPhone mirroring\033[0m"
+        echo ""
+        echo -e "\033[1;33mUsage:\033[0m mirror-repair [OPTIONS]"
+        echo ""
+        echo -e "\033[1;33mOptions:\033[0m"
+        echo "  --help, -h     Show this help message"
+        echo "  --version, -v  Show version information"
+        echo ""
+        echo -e "\033[1;34m💡 This tool patches /private/var/db/os_eligibility/eligibility.plist for iPhone mirroring.\033[0m"
+        exit 0
+        ;;
+    --version|-v)
+        echo -e "mirror-repair version 1.0.0"
+        echo -e "Part of shell-tools"
+        echo -e "Repository: https://github.com/jonasrombach/shell-tools"
+        exit 0
+        ;;
+    -*)
+        echo -e "\033[0;31m❌ Unknown option:\033[0m $1"
+        echo -e "Use --help for usage information."
+        exit 1
+        ;;
+esac
+
+# Colors
+RED="\033[0;31m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+MAGENTA="\033[1;35m"
+NC="\033[0m"
+
+input_file="/private/var/db/os_eligibility/eligibility.plist"
+temp_file="/tmp/eligibility_new.plist"
+counter=0
+
+if [[ ! -f "$input_file" ]]; then
+    echo -e "${RED}❌ Error:${NC} Input file not found: $input_file"
+    exit 1
+fi
+
+echo -e "${BLUE}🔍 Scanning:${NC} $input_file for iPhone mirroring eligibility..."
+
+# Clear temp file
+> "$temp_file"
+
+# Process file line by line
+while IFS= read -r line; do
+    if [[ "$line" == *"IRON"* ]]; then
+        echo "$line" >> "$temp_file"
+        counter=179
+    elif [[ $counter -ne 0 ]]; then
+        ((counter++))
+        case $counter in
+            184)
+                echo "${line//2/4}" >> "$temp_file"
+                echo -e "${MAGENTA}🛠️  Patched line $counter (2→4)${NC}"
+                ;;
+            188|190)
+                echo "${line//2/3}" >> "$temp_file"
+                echo -e "${MAGENTA}🛠️  Patched line $counter (2→3)${NC}"
+                ;;
+            194)
+                counter=0
+                echo "$line" >> "$temp_file"
+                ;;
+            *)
+                echo "$line" >> "$temp_file"
+                ;;
+        esac
+    else
+        echo "$line" >> "$temp_file"
+    fi
+done < "$input_file"
+
+echo -e "${BLUE}🔄 Applying changes...${NC}"
+# Replace original with modified version
+if sudo mv "$temp_file" "$input_file"; then
+    echo -e "${GREEN}🎉 Success:${NC} Patched $input_file"
+else
+    echo -e "${RED}❌ Error:${NC} Failed to update $input_file"
+    echo -e "${YELLOW}⚠️  Try running this script with elevated permissions (sudo) if you see a permission error.${NC}"
+    exit 1
+fi

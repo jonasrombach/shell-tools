@@ -59,6 +59,21 @@ A tool to repair Apple Magic device Bluetooth connections.
 magic-repair
 ```
 
+### mirror-repair
+A tool to patch your Mac's iPhone Mirroring eligibility file for use with iPhone Mirroring.
+
+**Usage:**
+```bash
+mirror-repair
+```
+
+- The script will scan and patch `/private/var/db/os_eligibility/eligibility.plist` for iPhone Mirroring support.
+- You may be prompted for your password, as root permissions are required to update the file.
+
+**Important:**
+- Your Apple Account on your iPhone for "Media & Purchases" must be outside of the EU (e.g., Norway). You can set up a new Apple ID for this purpose. Only running the `mirror-repair` command is not enough if your account is still set to an EU country.
+- You may need to grant Full Disk Access to your terminal app for the script to work.
+
 ## Notes
 
 - The installation modifies your shell profile to add the scripts directory to PATH

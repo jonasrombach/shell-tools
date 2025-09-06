@@ -140,6 +140,9 @@ main() {
             echo "This will add the scripts directory to your PATH, making all"
             echo "shell-tools scripts accessible from anywhere in your terminal."
             echo ""
+            # Ensure all scripts are executable
+            echo -e "${BLUE}🔑 Ensuring all scripts are executable...${NC}"
+            chmod +x "$SCRIPTS_DIR"/*
             add_to_path
             ;;
         *)
