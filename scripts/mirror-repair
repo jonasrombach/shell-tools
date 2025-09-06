@@ -15,7 +15,7 @@ case "${1:-}" in
         echo "  --help, -h     Show this help message"
         echo "  --version, -v  Show version information"
         echo ""
-        echo -e "\033[1;34m💡 This tool patches /private/var/db/os_eligibility/eligibility.plist for iPhone mirroring.\033[0m"
+        echo -e "\033[1;34m💡 This tool patches /private/var/db/os_eligibility/eligibility.plist for iPhone mirroring and opens the iPhone Mirroring app.\033[0m"
         exit 0
         ;;
     --version|-v)
@@ -48,46 +48,58 @@ if [[ ! -f "$input_file" ]]; then
     exit 1
 fi
 
-echo -e "${BLUE}🔍 Scanning:${NC} $input_file for iPhone mirroring eligibility..."
+echo -e "${BLUE}🔍 Checking if patch is needed...${NC}"
 
-# Clear temp file
-> "$temp_file"
-
-# Process file line by line
-while IFS= read -r line; do
-    if [[ "$line" == *"IRON"* ]]; then
-        echo "$line" >> "$temp_file"
-        counter=179
-    elif [[ $counter -ne 0 ]]; then
-        ((counter++))
-        case $counter in
-            184)
-                echo "${line//2/4}" >> "$temp_file"
-                echo -e "${MAGENTA}🛠️  Patched line $counter (2→4)${NC}"
-                ;;
-            188|190)
-                echo "${line//2/3}" >> "$temp_file"
-                echo -e "${MAGENTA}🛠️  Patched line $counter (2→3)${NC}"
-                ;;
-            194)
-                counter=0
-                echo "$line" >> "$temp_file"
-                ;;
-            *)
-                echo "$line" >> "$temp_file"
-                ;;
-        esac
-    else
-        echo "$line" >> "$temp_file"
-    fi
-done < "$input_file"
-
-echo -e "${BLUE}🔄 Applying changes...${NC}"
-# Replace original with modified version
-if sudo mv "$temp_file" "$input_file"; then
-    echo -e "${GREEN}🎉 Success:${NC} Patched $input_file"
+# Check if already patched (look for 4 or 3 in the right places)
+# We'll just check for the first relevant patch as a quick check
+if grep -A 10 'IRON' "$input_file" | grep -qE '4|3'; then
+    echo -e "${GREEN}✅ Already patched!${NC}"
 else
-    echo -e "${RED}❌ Error:${NC} Failed to update $input_file"
-    echo -e "${YELLOW}⚠️  Try running this script with elevated permissions (sudo) if you see a permission error.${NC}"
-    exit 1
+    echo -e "${BLUE}🔄 Patching eligibility.plist...${NC}"
+    # Clear temp file
+    > "$temp_file"
+    # Process file line by line
+    while IFS= read -r line; do
+        if [[ "$line" == *"IRON"* ]]; then
+            echo "$line" >> "$temp_file"
+            counter=179
+        elif [[ $counter -ne 0 ]]; then
+            ((counter++))
+            case $counter in
+                184)
+                    echo "${line//2/4}" >> "$temp_file"
+                    echo -e "${MAGENTA}🛠️  Patched line $counter (2→4)${NC}"
+                    ;;
+                188|190)
+                    echo "${line//2/3}" >> "$temp_file"
+                    echo -e "${MAGENTA}🛠️  Patched line $counter (2→3)${NC}"
+                    ;;
+                194)
+                    counter=0
+                    echo "$line" >> "$temp_file"
+                    ;;
+                *)
+                    echo "$line" >> "$temp_file"
+                    ;;
+            esac
+        else
+            echo "$line" >> "$temp_file"
+        fi
+    done < "$input_file"
+    echo -e "${BLUE}🔄 Applying changes...${NC}"
+    if sudo mv "$temp_file" "$input_file"; then
+        echo -e "${GREEN}🎉 Success:${NC} Patched $input_file"
+    else
+        echo -e "${RED}❌ Error:${NC} Failed to update $input_file"
+        echo -e "${YELLOW}⚠️  Try running this script with elevated permissions (sudo) if you see a permission error.${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${BLUE}📱 Launching iPhone Mirroring...${NC}"
+open -a "iPhone Mirroring"
+if [[ $? -eq 0 ]]; then
+    echo -e "${GREEN}✅ iPhone Mirroring launched!${NC}"
+else
+    echo -e "${YELLOW}⚠️  Could not launch iPhone Mirroring app. Please open it manually from Applications or Spotlight.${NC}"
 fi
