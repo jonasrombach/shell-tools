@@ -1,35 +1,8 @@
 #!/usr/bin/env bash
 
 # mirror-repair - Patch eligibility.plist for iPhone mirroring
-# Version: 1.0.0
+# Version: 1.1.0
 # Repository: https://github.com/jonasrombach/shell-tools
-
-# Handle command line arguments
-case "${1:-}" in
-    --help|-h)
-        echo -e "\033[1;34m🔄 mirror-repair - Patch eligibility.plist for iPhone mirroring\033[0m"
-        echo ""
-        echo -e "\033[1;33mUsage:\033[0m mirror-repair [OPTIONS]"
-        echo ""
-        echo -e "\033[1;33mOptions:\033[0m"
-        echo "  --help, -h     Show this help message"
-        echo "  --version, -v  Show version information"
-        echo ""
-        echo -e "\033[1;34m💡 This tool patches /private/var/db/os_eligibility/eligibility.plist for iPhone mirroring and opens the iPhone Mirroring app.\033[0m"
-        exit 0
-        ;;
-    --version|-v)
-        echo -e "mirror-repair version 1.0.0"
-        echo -e "Part of shell-tools"
-        echo -e "Repository: https://github.com/jonasrombach/shell-tools"
-        exit 0
-        ;;
-    -*)
-        echo -e "\033[0;31m❌ Unknown option:\033[0m $1"
-        echo -e "Use --help for usage information."
-        exit 1
-        ;;
-esac
 
 # Colors
 RED="\033[0;31m"
@@ -40,60 +13,74 @@ MAGENTA="\033[1;35m"
 NC="\033[0m"
 
 input_file="/private/var/db/os_eligibility/eligibility.plist"
-temp_file="/tmp/eligibility_new.plist"
-counter=0
+PLISTBUDDY="/usr/libexec/PlistBuddy"
+
+# Dependency check
+if [[ ! -x "$PLISTBUDDY" ]]; then
+    echo -e "${RED}❌ Error:${NC} PlistBuddy not found at $PLISTBUDDY. This tool is required."
+    echo -e "${YELLOW}💡 PlistBuddy is included with macOS. If missing, please check your system integrity.${NC}"
+    exit 1
+fi
 
 if [[ ! -f "$input_file" ]]; then
     echo -e "${RED}❌ Error:${NC} Input file not found: $input_file"
     exit 1
 fi
 
-echo -e "${BLUE}🔍 Checking if patch is needed...${NC}"
+echo -e "${BLUE}🔍 Checking and patching eligibility.plist using PlistBuddy...${NC}"
 
-# Check if already patched (look for 4 or 3 in the right places)
-# We'll just check for the first relevant patch as a quick check
-if grep -A 10 'IRON' "$input_file" | grep -qE '4|3'; then
-    echo -e "${GREEN}✅ Already patched!${NC}"
+# Helper to read a value
+read_plist_value() {
+    "$PLISTBUDDY" -c "Print $1" "$input_file" 2>/dev/null
+}
+# Helper to set a value
+set_plist_value() {
+    sudo "$PLISTBUDDY" -c "Set $1 $2" "$input_file"
+}
+
+# 1. Patch os_eligibility_answer_t
+key1="OS_ELIGIBILITY_DOMAIN_IRON:os_eligibility_answer_t"
+old1=$(read_plist_value "$key1")
+if [[ "$old1" == "2" ]]; then
+    echo -e "${YELLOW}📝 $key1:${NC}"
+    echo -e "  ${RED}- $old1${NC}"
+    echo -e "  ${GREEN}+ 4${NC}"
+    set_plist_value "$key1" 4
+    changed=1
 else
-    echo -e "${BLUE}🔄 Patching eligibility.plist...${NC}"
-    # Clear temp file
-    > "$temp_file"
-    # Process file line by line
-    while IFS= read -r line; do
-        if [[ "$line" == *"IRON"* ]]; then
-            echo "$line" >> "$temp_file"
-            counter=179
-        elif [[ $counter -ne 0 ]]; then
-            ((counter++))
-            case $counter in
-                184)
-                    echo "${line//2/4}" >> "$temp_file"
-                    echo -e "${MAGENTA}🛠️  Patched line $counter (2→4)${NC}"
-                    ;;
-                188|190)
-                    echo "${line//2/3}" >> "$temp_file"
-                    echo -e "${MAGENTA}🛠️  Patched line $counter (2→3)${NC}"
-                    ;;
-                194)
-                    counter=0
-                    echo "$line" >> "$temp_file"
-                    ;;
-                *)
-                    echo "$line" >> "$temp_file"
-                    ;;
-            esac
-        else
-            echo "$line" >> "$temp_file"
-        fi
-    done < "$input_file"
-    echo -e "${BLUE}🔄 Applying changes...${NC}"
-    if sudo mv "$temp_file" "$input_file"; then
-        echo -e "${GREEN}🎉 Success:${NC} Patched $input_file"
-    else
-        echo -e "${RED}❌ Error:${NC} Failed to update $input_file"
-        echo -e "${YELLOW}⚠️  Try running this script with elevated permissions (sudo) if you see a permission error.${NC}"
-        exit 1
-    fi
+    echo -e "${GREEN}✅ $key1 already set to $old1${NC}"
+fi
+
+# 2. Patch status:OS_ELIGIBILITY_INPUT_COUNTRY_BILLING
+key2="OS_ELIGIBILITY_DOMAIN_IRON:status:OS_ELIGIBILITY_INPUT_COUNTRY_BILLING"
+old2=$(read_plist_value "$key2")
+if [[ "$old2" == "2" ]]; then
+    echo -e "${YELLOW}📝 $key2:${NC}"
+    echo -e "  ${RED}- $old2${NC}"
+    echo -e "  ${GREEN}+ 3${NC}"
+    set_plist_value "$key2" 3
+    changed=1
+else
+    echo -e "${GREEN}✅ $key2 already set to $old2${NC}"
+fi
+
+# 3. Patch status:OS_ELIGIBILITY_INPUT_COUNTRY_LOCATION
+key3="OS_ELIGIBILITY_DOMAIN_IRON:status:OS_ELIGIBILITY_INPUT_COUNTRY_LOCATION"
+old3=$(read_plist_value "$key3")
+if [[ "$old3" == "2" ]]; then
+    echo -e "${YELLOW}📝 $key3:${NC}"
+    echo -e "  ${RED}- $old3${NC}"
+    echo -e "  ${GREEN}+ 3${NC}"
+    set_plist_value "$key3" 3
+    changed=1
+else
+    echo -e "${GREEN}✅ $key3 already set to $old3${NC}"
+fi
+
+if [[ "$changed" == "1" ]]; then
+    echo -e "${GREEN}🎉 Success:${NC} Patched $input_file"
+else
+    echo -e "${GREEN}✅ No changes needed. Already patched!${NC}"
 fi
 
 echo -e "${BLUE}📱 Launching iPhone Mirroring...${NC}"
