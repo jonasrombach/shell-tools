@@ -284,16 +284,56 @@ mirror-repair
 
 ## Development checks
 
+Repository guidance for coding agents lives in [AGENTS.md](AGENTS.md).
+It records the product constraints, architecture, verification commands and
+Bluetooth pitfalls that need to survive between sessions. Update it when a
+concrete lesson changes how future work should be done. Copilot's instruction
+file points to the same guidance to avoid conflicting copies.
+
+Development setup is separate from user installation: it creates a local,
+ignored `.venv` without editing your shell profile or accessing Bluetooth.
+
 ```bash
-/bin/bash -n scripts/magic-repair
-shellcheck scripts/magic-repair
-python3 -m unittest discover -s tests -v
+brew install python jq shellcheck bash
+make setup-dev
+make check
 ```
 
-Tests use a stateful fake `blueutil` and macOS's Bash 3.2; they do not change
-real Bluetooth connections. ShellCheck is a development tool. Python 3 and Rich
-are also used by the normal terminal dashboard; the tests exercise the Bash
-engine directly.
+`make check` runs syntax checks for all shell/Python files, ShellCheck, the
+unittest behavior suite and a static Rich demo. Tests use a stateful fake
+`blueutil`, mocked authorization and temporary state; they do not change real
+Bluetooth connections. The demo does not start the engine. `mirror-repair` is
+linted but never executed. No hardware, installed `blueutil` or Bluetooth
+permission is needed for these checks.
+
+For smaller iterations, use `make lint`, `make test` or `make demo`. To check
+the engine with current Homebrew Bash instead of macOS Bash 3.2:
+
+```bash
+make test TEST_BASH="$(brew --prefix)/bin/bash"
+```
+
+GitHub Actions runs the same `make check` on macOS for pushes and pull requests,
+and weekly to catch dependency drift. The two configurations cover Python 3.10
+with system Bash and Python 3.14 with Homebrew Bash. CI validates simulated
+behavior and rendering; terminal permission attribution and accessory handoff
+still require an explicit live test on the target Mac.
+
+Runtime requirements have one source:
+[`requirements.txt`](scripts/lib/magic-repair/requirements.txt), shared by the
+installer and development setup. Dependabot proposes weekly grouped updates for
+those requirements and the SHA-pinned GitHub Actions. Updates are not automatically
+merged. Requirements intentionally allow newer compatible releases; run
+`make setup-dev` to refresh development dependencies and `./install.sh` to refresh
+installed dependencies. Homebrew tools remain a manual maintenance step below.
+
+This setup follows the official recommendations to keep agent instructions short
+and repository-specific, and to provide executable verification commands:
+[OpenAI agent guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md),
+[OpenAI development practices](https://learn.chatgpt.com/guides/best-practices),
+[GitHub instruction support](https://docs.github.com/en/copilot/reference/custom-instructions-support).
+For this small project, one guide and one check entry point keep maintenance
+manageable; per-agent frameworks and persistent session journals add little value.
 
 Keep the installed runtime dependencies current via Homebrew:
 

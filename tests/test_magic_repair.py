@@ -11,6 +11,7 @@ import time
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/magic-repair'
+TEST_BASH = os.environ.get('TEST_BASH', '/bin/bash')
 MAC = 'aa:bb:cc:dd:ee:01'
 OTHER = 'aa:bb:cc:dd:ee:02'
 FAKE = r'''#!/usr/bin/env python3
@@ -102,7 +103,7 @@ class MagicRepairTests(unittest.TestCase):
         self.state.write_text(json.dumps(self.data))
 
     def run_tool(self, *args):
-        return subprocess.run(['/bin/bash', str(SCRIPT), '--config', str(self.config),
+        return subprocess.run([TEST_BASH, str(SCRIPT), '--config', str(self.config),
                                '--attempts', '1', *args], env=self.env, text=True,
                               capture_output=True, timeout=25)
 
@@ -322,7 +323,7 @@ class MagicRepairTests(unittest.TestCase):
     def assert_signal_cleanup(self, *extra_args):
         self.data['hang'] = '--pair'
         self.save()
-        proc = subprocess.Popen(['/bin/bash', str(SCRIPT), '--config', str(self.config), *extra_args],
+        proc = subprocess.Popen([TEST_BASH, str(SCRIPT), '--config', str(self.config), *extra_args],
                                 env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True)
         self.addCleanup(lambda: proc.kill() if proc.poll() is None else None)
@@ -496,7 +497,7 @@ class MagicRepairTests(unittest.TestCase):
                     # An already connected device exercises UI without changing pairing.
                     self.data['devices'][0]['connected'] = True
                     self.save()
-                    result = subprocess.run(['/bin/bash', str(SCRIPT), '--config', str(self.config), *args],
+                    result = subprocess.run([TEST_BASH, str(SCRIPT), '--config', str(self.config), *args],
                                             env=env, stdout=slave, stderr=slave, timeout=10)
                     # Keep our slave FD open while draining: macOS can discard
                     # queued PTY output when the last slave descriptor closes.

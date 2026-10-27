@@ -2,9 +2,10 @@
 # Renderer dependencies live outside the repository and system Python.
 set -euo pipefail
 ui_env="${XDG_DATA_HOME:-$HOME/.local/share}/shell-tools/magic-repair-ui"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required. Install with: brew install python\n' >&2; exit 1; }
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || { printf 'Python 3.10+ is required. Install with: brew install python\n' >&2; exit 1; }
 python3 -m venv "$ui_env"
-"$ui_env/bin/python" -m pip install --upgrade pip 'rich>=15.0.0' 'pyobjc-framework-CoreBluetooth>=12.2.2'
+"$ui_env/bin/python" -m pip install --upgrade pip -r "$script_dir/requirements.txt"
 printf '\nMagic Repair is ready. Preview it with: magic-repair --demo\n'
 printf 'Bluetooth access is checked on first use. If needed, enable your terminal app in the settings that open.\n'

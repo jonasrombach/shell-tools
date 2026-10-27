@@ -9,7 +9,6 @@ RED="\033[0;31m"
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
 BLUE="\033[1;34m"
-MAGENTA="\033[1;35m"
 NC="\033[0m"
 
 input_file="/private/var/db/os_eligibility/eligibility.plist"
@@ -84,8 +83,7 @@ else
 fi
 
 echo -e "${BLUE}📱 Launching iPhone Mirroring...${NC}"
-open -a "iPhone Mirroring"
-if [[ $? -eq 0 ]]; then
+if open -a "iPhone Mirroring"; then
     echo -e "${GREEN}✅ iPhone Mirroring launched!${NC}"
 else
     echo -e "${YELLOW}⚠️  Could not launch iPhone Mirroring app. Please open it manually from Applications or Spotlight.${NC}"

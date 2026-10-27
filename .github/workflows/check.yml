@@ -1,0 +1,49 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 8 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Python ${{ matrix.python }} / ${{ matrix.bash }} Bash
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: '3.10'
+            bash: system
+          - python: '3.14'
+            bash: homebrew
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install development prerequisites
+        run: brew install jq shellcheck bash
+      - run: make setup-dev
+      - name: Select Bash
+        env:
+          BASH_VARIANT: ${{ matrix.bash }}
+        run: |
+          if [[ "$BASH_VARIANT" == homebrew ]]; then
+            echo "TEST_BASH=$(brew --prefix)/bin/bash" >> "$GITHUB_ENV"
+          else
+            echo 'TEST_BASH=/bin/bash' >> "$GITHUB_ENV"
+          fi
+      - run: make check
