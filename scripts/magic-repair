@@ -1,278 +1,674 @@
 #!/usr/bin/env bash
+# Repair local pairing records when switching Magic devices between Macs.
+# Compatible with the Bash 3.2 shipped with macOS.
+set -o pipefail
+run_started=$SECONDS
 
-# magic-repair - Repair Apple Magic device Bluetooth connections
-# Version: 1.0.0
-# Repository: https://github.com/jonasrombach/shell-tools
-
-# Handle command line arguments
-case "${1:-}" in
-    --help|-h)
-        echo "magic-repair - Repair Apple Magic device Bluetooth connections"
-        echo ""
-        echo "Usage: magic-repair [OPTIONS]"
-        echo ""
-        echo "Options:"
-        echo "  --help, -h     Show this help message"
-        echo "  --version, -v  Show version information"
-        echo ""
-        echo "Dependencies:"
-        echo "  - blueutil (install with: brew install blueutil)"
-        echo "  - jq (install with: brew install jq)"
-        echo ""
-        echo "This tool searches for Magic devices and attempts to repair"
-        echo "their Bluetooth connections by unpairing and re-pairing them."
-        exit 0
-        ;;
-    --version|-v)
-        echo "magic-repair version 1.0.0"
-        echo "Part of shell-tools"
-        echo "Repository: https://github.com/jonasrombach/shell-tools"
-        exit 0
-        ;;
-    -*)
-        echo "Unknown option: $1"
-        echo "Use --help for usage information."
-        exit 1
-        ;;
-esac
-
-# Colors
-RED="\033[0;31m"
-GREEN="\033[1;32m"
-YELLOW="\033[1;33m"
-BLUE="\033[1;34m"
-MAGENTA="\033[1;35m"
-NC="\033[0m"
-
-# Configuration
+VERSION=3.0.0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/config/magic-repair.conf"
-search_terms=()
-
-# Function to show usage
-show_usage() {
-    echo "Usage: $0 [OPTIONS]"
-    echo ""
-    echo "OPTIONS:"
-    echo "  -s TERM    Add search term for device names (can be used multiple times)"
-    echo "  -h, --help Show this help message"
-    echo ""
-    echo "Examples:"
-    echo "  $0 -s \"Magic\" -s \"Jonas\"     # Search for devices containing 'Magic' AND 'Jonas'"
-    echo "  $0 -s \"Dell\" -s \"Tom\"        # Search for devices containing 'Dell' AND 'Tom'"
-    echo ""
-    echo "Configuration file:"
-    echo "  If no search terms are provided via -s, the script will look for"
-    echo "  a configuration file at: ${CONFIG_FILE}"
-    echo ""
-    echo "  Example configuration file content:"
-    echo "  search_terms=\"Magic Jonas\""
-    echo "  # or"
-    echo "  search_terms=\"Dell Tom\""
-}
-
-# Function to read configuration file
-read_config() {
-    if [[ -f "$CONFIG_FILE" ]]; then
-        # Source the config file in a subshell to avoid polluting current environment
-        local config_search_terms
-        config_search_terms=$(grep '^search_terms=' "$CONFIG_FILE" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
-        if [[ -n "$config_search_terms" ]]; then
-            # Split the config search terms and add to array
-            read -ra terms <<< "$config_search_terms"
-            for term in "${terms[@]}"; do
-                search_terms+=("$term")
-            done
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -s)
-            if [[ -n "$2" ]]; then
-                search_terms+=("$2")
-                shift 2
-            else
-                echo -e "${RED}❌ Error:${NC} -s requires a search term"
-                exit 1
-            fi
-            ;;
-        -h|--help)
-            show_usage
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}❌ Error:${NC} Unknown option: $1"
-            show_usage
-            exit 1
-            ;;
+# Terminals use the dashboard; redirected output stays append-only text.
+ui_python="${XDG_DATA_HOME:-$HOME/.local/share}/shell-tools/magic-repair-ui/bin/python"
+want_ui=auto
+want_demo=0
+for argument in "$@"; do
+    case $argument in
+        --demo) want_demo=1 ;;
+        --version|-v) want_ui=plain ;;
     esac
 done
-
-# If no search terms provided via arguments, try to read from config
-if [[ ${#search_terms[@]} -eq 0 ]]; then
-    if ! read_config; then
-        echo -e "${RED}❌ Error:${NC} No search terms provided and no valid configuration found."
-        echo ""
-        show_usage
-        exit 1
+if [[ ${MAGIC_REPAIR_UI_ACTIVE:-0} != 1 ]]; then
+    if [[ $want_demo -eq 1 ||
+          $want_ui == auto && -t 1 && -t 2 && ${TERM:-dumb} != dumb ]]; then
+        if [[ -x $ui_python && -f $SCRIPT_DIR/lib/magic-repair/ui.py ]]; then
+            exec "$ui_python" "$SCRIPT_DIR/lib/magic-repair/ui.py" --engine "${BASH_SOURCE[0]}" --engine-shell "$BASH" -- "$@"
+        else
+            printf 'Install Magic Repair dependencies first: %s/../install.sh\n' "$SCRIPT_DIR" >&2
+            exit 1
+        fi
     fi
 fi
+config_file="${XDG_CONFIG_HOME:-$HOME/.config}/magic-repair/config"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/magic-repair"
+search_terms=()
+addresses=()
+mode=repair
+preview=0
+list=0
+force=0
+no_color=0
+diagnose=0
+scan=0
+diagnostic_file=
+diagnostic_reader_pid=
+diagnostic_failed=0
+blue='' green='' yellow='' red='' reset=''
+attempts=3
+timeout=45
+pair_timeout=12
+pair_timeout_explicit=0
+device_deadline=0
+call_deadline=0
+global_failure=0
+state_paired=false
+state_connected=false
+active_pid=
+timer_pid=
+work_dir=
+lock_dir=
+reply=
 
-# Validate that we have search terms
-if [[ ${#search_terms[@]} -eq 0 ]]; then
-    echo -e "${RED}❌ Error:${NC} No search terms available."
-    echo ""
-    show_usage
-    exit 1
-fi
+usage() {
+    cat <<'HELP'
+magic-repair - Switch your Magic devices to this Mac
 
-# Check if blueutil is installed
-if ! command -v blueutil &> /dev/null; then
-    echo -e "${RED}❌ Error:${NC} 'blueutil' not found."
-    echo -e "${YELLOW}Install with:${NC} brew install blueutil"
-    exit 1
-fi
+Usage: magic-repair [OPTIONS]
+  -s, --search TERM     Match ALL terms literally, ignoring ASCII case (repeatable)
+  -d, --device ADDRESS Target an exact Bluetooth address (repeatable)
+  --re-pair            Renew local pairing (default); skip connected devices
+  --reconnect          Disconnect/connect only, retaining pairing records
+  --force              Repair even devices already connected to this Mac
+  --list               List selected devices without changing anything
+  --no-color           Disable terminal colors (also respects NO_COLOR)
+  --demo               Preview the dashboard; never accesses Bluetooth
+  --diagnose           Save a private local diagnostic log for this run
+  --scan               Include nearby devices (one 10s scan, up to 20s total)
+  --dry-run            Preview actions without changing anything
+  --config FILE        Read this configuration instead of the default
+  --attempts N         Maximum recovery rounds per device, 1-10 (default: 3)
+  --timeout SECONDS    Total elapsed budget per device, 1-300 (default: 45)
+  --pair-timeout SEC   Pairing call limit, 1-300 (default: 12; 30 with --scan)
+  -h, --help           Show help
+  -v, --version        Show version
 
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}❌ Error:${NC} 'jq' not found."
-    echo -e "${YELLOW}Install with:${NC} brew install jq"
-    exit 1
-fi
+Dependencies: macOS, blueutil and jq (brew install blueutil jq).
+CLI selectors override configuration. Search and exact addresses cannot mix.
+Configuration: $XDG_CONFIG_HOME/magic-repair/config (default ~/.config),
+falling back to scripts/config/magic-repair.conf. Legacy search_terms="Magic Jonas"
+is supported; use repeated search_term="a phrase" for terms containing spaces.
+Alternatively, use repeated device="AA:BB:CC:DD:EE:FF" for fixed targets.
+For a device not yet known to this Mac, use --scan and switch it on when the
+scan starts. Only matching names are selected. Some BLE devices may not appear
+in blueutil's inquiry; use cable pairing or a known --device address instead.
 
-unpair_device() {
-    local mac="$1"
-    local name="$2"
-    echo -e "${BLUE}Disconnecting ${name}...${NC}"
-    blueutil --unpair "$mac" &>/dev/null || true
+Targets are remembered in $XDG_STATE_HOME/magic-repair/devices.json (default
+~/.local/state), so an interrupted re-pair can be retried by running again.
+Turn the devices off/on, then run magic-repair on the Mac you want to use.
+A local script cannot force another Mac to release an active connection.
+All devices get a first attempt before retries. Pairing has a 12s limit (30s
+with --scan for initial PIN/confirmation),
+connecting 8s; state checks are shorter. Retries follow the observed state,
+with 2s/5s cooldowns. The device budget includes waiting and work on other
+devices, starting with its first attempt. Ctrl-C cancels; rerun to recover.
+Exit codes: 0 success, 1 repair/discovery failure, 2 usage/configuration error.
+Diagnostics: $XDG_STATE_HOME/magic-repair/logs/ (default ~/.local/state).
+Logs include target names/addresses, timings, states and error codes, not PINs
+or keyboard input. --diagnose writes a log even with --dry-run or --list.
+HELP
 }
 
-pair_with_retries() {
-    local mac="$1"
-    local name="$2"
-    local retries=3
-    local wait_times=(2 5 10)
-
-    for attempt in $(seq 1 $retries); do
-        echo -e "\t${BLUE}🔗 Pairing – Attempt ${attempt}/${retries}${NC}"
-        sleep "${wait_times[$((attempt-1))]}"
-        if blueutil --pair "$mac" &>/dev/null; then
-            echo -e "\t${GREEN}✅ Pairing successful.${NC}"
-            return 0
-        fi
-        echo -e "\t${YELLOW}⚠️ Pairing attempt ${attempt} failed.${NC}"
-    done
-    return 1
+fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+usage_error() { printf 'Error: %s\nUse --help for usage.\n' "$*" >&2; exit 2; }
+need_value() { [[ $# -ge 2 && -n $2 && $2 != -* ]] || usage_error "$1 requires a value"; }
+# Structured append-only events, kept separate from terminal output. Numeric
+# timestamps retain subsecond precision without another runtime dependency.
+diagnostic_event() {
+    local event=$1 record
+    shift
+    [[ -n ${MAGIC_REPAIR_UI_FD:-} || -n $diagnostic_file && $diagnostic_failed -eq 0 ]] || return 0
+    record=$(jq -cn --arg event "$event" --argjson elapsed_s "$SECONDS" "$@" '{timestamp:now} + $ARGS.named') || return 0
+    if [[ -n ${MAGIC_REPAIR_UI_FD:-} ]]; then
+        printf '%s\n' "$record" >&"$MAGIC_REPAIR_UI_FD" || :
+    fi
+    if [[ -n $diagnostic_file && $diagnostic_failed -eq 0 ]] && ! printf '%s\n' "$record" >&9; then
+        diagnostic_failed=1
+        printf 'Warning: diagnostic logging failed; the log may be incomplete.\n' >&2
+    fi
+    return 0
+}
+ui() {
+    local kind=$1 color tag
+    shift
+    case $kind in
+        ok) color=$green; tag=ok ;;
+        warn) color=$yellow; tag='wait' ;;
+        error) color=$red; tag=error ;;
+        *) color=$blue; tag=info ;;
+    esac
+    printf '  %s[%s]%s %s\n' "$color" "$tag" "$reset" "$*"
+    diagnostic_event message --arg level "$kind" --arg message "$*"
+}
+normalize_address() {
+    local value
+    [[ $1 =~ ^[0-9a-fA-F]{12}$ ||
+       $1 =~ ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ||
+       $1 =~ ^([0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2}$ ]] || return 1
+    value=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d ':-')
+    [[ $value =~ ^[0-9a-f]{12}$ ]] || return 1
+    printf '%s:%s:%s:%s:%s:%s' "${value:0:2}" "${value:2:2}" "${value:4:2}" "${value:6:2}" "${value:8:2}" "${value:10:2}"
 }
 
-connect_with_retries() {
-    local mac="$1"
-    local name="$2"
-    local retries=3
-    local wait_times=(2 5 8)
-
-    for attempt in $(seq 1 $retries); do
-        echo -e "\t${BLUE}🔗 Connecting – Attempt ${attempt}/${retries}${NC}"
-        sleep "${wait_times[$((attempt-1))]}"
-        if blueutil --connect "$mac" &>/dev/null; then
-            echo -e "\t${GREEN}✅ Connection successful.${NC}"
-            return 0
-        fi
-        echo -e "\t${YELLOW}⚠️ Connection attempt ${attempt} failed.${NC}"
-    done
-    return 1
-}
-
-restart_bluetooth() {
-    echo -e "${BLUE}🔄 Restarting bluetooth...${NC}"
-    blueutil --power 0
-    sleep 3
-    blueutil --power 1
-    sleep 3
-}
-
-# Build jq filter for search terms
-build_jq_filter() {
-    local filter_parts=()
-    for term in "${search_terms[@]}"; do
-        filter_parts+=("test(\"(?i)${term}\")")
-    done
-    # Join filter parts with ' and '
-    local jq_filter
-    jq_filter=$(printf "%s and " "${filter_parts[@]}")
-    jq_filter="${jq_filter% and }"  # Remove trailing ' and '
-    echo ".[] | select(.name | $jq_filter) | \"\(.address)|\(.name)\""
-}
-
-# Search for matching devices
-echo ""
-search_terms_display=$(IFS=', '; echo "'${search_terms[*]}'")
-echo -e "${BLUE}🔍 Searching for bluetooth devices with ${search_terms_display}...${NC}"
-echo ""
-devices=()
-jq_filter=$(build_jq_filter)
-while IFS= read -r line; do
-    devices+=("$line")
-done < <(blueutil --paired --format json | jq -r "$jq_filter")
-
-if [[ ${#devices[@]} -eq 0 ]]; then
-    echo -e "${RED}❌ No matching devices found. Please pair manually.${NC}"
-    exit 1
-fi
-
-# Phase 1: Un-pair all devices in parallel
-for dev in "${devices[@]}"; do
-    mac="${dev%%|*}"
-    name="${dev##*|}"
-    unpair_device "$mac" "$name" &
+explicit_config=0
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help) usage; exit 0 ;;
+        -v|--version) printf 'magic-repair %s\n' "$VERSION"; exit 0 ;;
+        -s|--search) need_value "$@"; search_terms+=("$2"); shift 2 ;;
+        -d|--device)
+            need_value "$@"
+            address=$(normalize_address "$2") || usage_error "Invalid Bluetooth address: $2"
+            addresses+=("$address"); shift 2 ;;
+        --config) need_value "$@"; config_file=$2; explicit_config=1; shift 2 ;;
+        --attempts|--timeout|--pair-timeout)
+            need_value "$@"
+            [[ $2 =~ ^[1-9][0-9]{0,2}$ ]] || usage_error "$1 requires a positive integer"
+            if [[ $1 == --attempts ]]; then
+                [[ $2 -le 10 ]] || usage_error '--attempts must be 1-10'
+                attempts=$2
+            else
+                [[ $2 -le 300 ]] || usage_error "$1 must be 1-300"
+                if [[ $1 == --pair-timeout ]]; then
+                    pair_timeout=$2
+                    pair_timeout_explicit=1
+                else
+                    timeout=$2
+                fi
+            fi
+            shift 2 ;;
+        --re-pair) mode=repair; shift ;;
+        --reconnect) mode=reconnect; shift ;;
+        --force) force=1; shift ;;
+        --dry-run) preview=1; shift ;;
+        --list) list=1; shift ;;
+        --no-color) no_color=1; shift ;;
+        --diagnose) diagnose=1; shift ;;
+        --scan) scan=1; shift ;;
+        *) usage_error "Unknown argument: $1" ;;
+    esac
 done
-wait
-echo ""
-echo -e "${GREEN}⛓️‍💥  Disconnected all matching devices.${NC}"
-echo ""
+if [[ $scan -eq 1 && $pair_timeout_explicit -eq 0 ]]; then
+    # Initial pairing may need a human PIN/confirmation. This is only an upper
+    # limit; a fast automatic pairing still completes immediately.
+    pair_timeout=30
+fi
+if [[ -t 1 && -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR+x} && $no_color -eq 0 ]]; then
+    blue=$'\033[34m'; green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
+fi
+[[ ${#addresses[@]} -eq 0 || ${#search_terms[@]} -eq 0 ]] || usage_error 'Use either search terms or exact addresses'
 
-# Phase 2: Pair + Connect devices one after another
-for dev in "${devices[@]}"; do
-    mac="${dev%%|*}"
-    name="${dev##*|}"
-
-    icon="⌨️"
-
-    if [[ $name == *"Trackpad"* ]]; then
-        icon="🖱️"
-    elif [[ $name == *"Mouse"* ]]; then
-        icon="🖱️"
+# Parse data only: configuration must never execute shell code.
+read_config() {
+    local line value key
+    while IFS= read -r line || [[ -n $line ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z $line || $line == \#* ]] && continue
+        [[ $line == *=* ]] || usage_error "Invalid configuration line in $config_file"
+        key=${line%%=*}; value=${line#*=}
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        if [[ $value == \"* || $value == \'* ]]; then
+            if [[ ${#value} -lt 2 ||
+                  $value == \"* && $value != *\" || $value == \'* && $value != *\' ]]; then
+                usage_error "Unclosed quote in $config_file"
+            fi
+        fi
+        if [[ $value == \"*\" || $value == \'*\' ]]; then
+            value=${value:1:${#value}-2}
+        fi
+        [[ -n $value ]] || usage_error "Empty $key in $config_file"
+        case $key in
+            device)
+                value=$(normalize_address "$value") || usage_error "Invalid Bluetooth address in $config_file"
+                addresses+=("$value") ;;
+            search_term) search_terms+=("$value") ;;
+            search_terms)
+                local terms=()
+                read -r -a terms <<< "$value"
+                search_terms+=("${terms[@]}") ;;
+            *) usage_error "Unknown configuration key: $key" ;;
+        esac
+    done < "$config_file"
+}
+if [[ $explicit_config -eq 1 && ! -f $config_file ]]; then
+    usage_error "Configuration not found: $config_file"
+fi
+if [[ ${#search_terms[@]} -eq 0 && ${#addresses[@]} -eq 0 ]]; then
+    if [[ ! -f $config_file && $explicit_config -eq 0 ]]; then
+        config_file="$SCRIPT_DIR/config/magic-repair.conf"
     fi
+    [[ -r $config_file ]] || usage_error "Cannot read configuration: $config_file"
+    read_config
+    [[ ${#search_terms[@]} -gt 0 || ${#addresses[@]} -gt 0 ]] || usage_error 'No devices or search terms configured'
+    [[ ${#addresses[@]} -eq 0 || ${#search_terms[@]} -eq 0 ]] || usage_error 'Configure either search terms or exact addresses'
+fi
+[[ $(uname -s) == Darwin ]] || fail 'magic-repair requires macOS'
+for dependency in blueutil jq; do
+    command -v "$dependency" >/dev/null 2>&1 || fail "Missing $dependency. Install with: brew install blueutil jq"
+done
 
-    echo -e "${BLUE}${icon}  ${name}${NC}"
+cleanup() {
+    local exit_status=$?
+    if [[ -n $timer_pid ]]; then
+        kill "$timer_pid" 2>/dev/null || :
+        wait "$timer_pid" 2>/dev/null || :
+    fi
+    if [[ -n $active_pid ]]; then
+        kill -KILL "$active_pid" 2>/dev/null || :
+        wait "$active_pid" 2>/dev/null || :
+    fi
+    if [[ -n $diagnostic_reader_pid ]]; then
+        kill -KILL "$diagnostic_reader_pid" 2>/dev/null || :
+        wait "$diagnostic_reader_pid" 2>/dev/null || :
+    fi
+    diagnostic_event run_end --argjson exit_status "$exit_status"
+    [[ -z $work_dir ]] || rm -rf "$work_dir"
+    [[ -z $lock_dir ]] || rmdir "$lock_dir" 2>/dev/null || :
+}
+trap cleanup EXIT
+trap 'ui warn "Cancelled. Saved target addresses are kept; run again to retry." >&2; exit 130' INT
+trap 'ui warn "Stopped. Saved target addresses are kept; run again to retry." >&2; exit 143' TERM
+umask 077
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/magic-repair.XXXXXXXX") || fail 'Cannot create temporary directory'
+if [[ $diagnose -eq 1 ]]; then
+    mkdir -p "$state_dir/logs" || fail 'Cannot create diagnostic log directory'
+    diagnostic_dir=$(mktemp -d "$state_dir/logs/run-$(date -u +%Y%m%dT%H%M%SZ).XXXXXXXX") || fail 'Cannot create diagnostic run directory'
+    diagnostic_file="$diagnostic_dir/events.jsonl"
+    exec 9>> "$diagnostic_file" || fail 'Cannot open diagnostic log'
+    mkfifo "$work_dir/stderr.pipe" || fail 'Cannot prepare diagnostic stderr capture'
+    ln -sfn "$diagnostic_file" "$state_dir/logs/latest.jsonl" || fail 'Cannot create latest diagnostic log link'
+    printf 'Diagnostic log: %s\n' "$diagnostic_file"
+    diagnostic_event run_start --arg version "$VERSION" --arg bash "$BASH_VERSION" \
+        --arg log_path "$diagnostic_file" \
+        --arg macos "$(sw_vers -productVersion)" --arg terminal "${TERM_PROGRAM:-unknown}" \
+        --arg term "${TERM:-unknown}" --arg blueutil_path "$(command -v blueutil)" \
+        --arg jq_version "$(jq --version)" --arg mode "$mode" \
+        --argjson force "$force" --argjson preview "$preview" --argjson list "$list" \
+        --argjson scan "$scan" \
+        --argjson timeout "$timeout" --argjson pair_timeout "$pair_timeout" --argjson attempts "$attempts"
+fi
+# Serialize discovery and state updates too, so overlapping runs cannot read
+# pairing records or overwrite remembered targets from different snapshots.
+if [[ $list -eq 0 && $preview -eq 0 ]]; then
+    mkdir -p "$state_dir" || fail 'Cannot create state directory'
+    if ! mkdir "$state_dir/repair.lock" 2>/dev/null; then
+        fail "Another repair may be running. If none is running, remove $state_dir/repair.lock and retry."
+    fi
+    lock_dir="$state_dir/repair.lock"
+fi
 
-    if ! pair_with_retries "$mac" "$name"; then
-        echo -e "${MAGENTA}❓ Pairing of ${name} failed. Restart Bluetooth? (y/n)${NC}"
-        echo -e "${YELLOW}💡 Tipp: Turn your devices off and on again before executing.${NC}"
-        read -r answer
-        if [[ "$answer" == "y" ]]; then
-            restart_bluetooth
-            if ! pair_with_retries "$mac" "$name"; then
-                echo -e "${RED}❌ Pairing of ${name} failed finally.${NC}"
-                echo ""
-                continue
+# blueutil's pair/disconnect can hang. Bound every call without GNU timeout.
+# Keep stderr and stdin attached so pairing prompts remain visible and usable.
+run_blueutil() {
+    local started=$SECONDS status limit label remaining elapsed next_update=5 deadline timed_out=false address='' hci_error=''
+    reply=
+    case $1 in
+        --pair) limit=$pair_timeout; label=pairing ;;
+        --connect) limit=8; label=connecting ;;
+        --unpair) limit=5; label='removing the local pairing' ;;
+        --disconnect) limit=5; label=disconnecting ;;
+        --paired) limit=5; label='reading paired devices' ;;
+        --inquiry) limit=20; label='searching for nearby devices' ;;
+        *) limit=3; label='checking Bluetooth state' ;;
+    esac
+    for deadline in "$device_deadline" "$call_deadline"; do
+        if [[ $deadline -gt 0 ]]; then
+            remaining=$((deadline - SECONDS))
+            if [[ $remaining -le 0 ]]; then return 75; fi
+            if [[ $remaining -lt $limit ]]; then limit=$remaining; fi
+        fi
+    done
+    case $1 in
+        --info|--pair|--unpair|--connect|--disconnect) address=${2:-} ;;
+    esac
+    diagnostic_event call_start --arg action "$1" --arg address "$address" --argjson limit_s "$limit"
+    if [[ $diagnose -eq 1 ]]; then
+        # Duplicate stderr live without redirecting the whole script away from
+        # its TTY. Only an extracted HCI error code is persisted, never prompts.
+        /usr/bin/tee "$work_dir/stderr" < "$work_dir/stderr.pipe" >&2 9>&- &
+        diagnostic_reader_pid=$!
+        blueutil "$@" <&0 > "$work_dir/output" 2> "$work_dir/stderr.pipe" 9>&- &
+    else
+        blueutil "$@" <&0 > "$work_dir/output" &
+    fi
+    active_pid=$!
+    # SECONDS is integer-valued: crossing a wall-clock second can happen just
+    # after a call starts. A relative sleep supplies the actual call deadline.
+    sleep "$limit" 9>&- &
+    timer_pid=$!
+    while kill -0 "$active_pid" 2>/dev/null; do
+        elapsed=$((SECONDS - started))
+        if ! kill -0 "$timer_pid" 2>/dev/null; then
+            # Prefer a completed command if it finished as the timer expired.
+            kill -0 "$active_pid" 2>/dev/null || break
+            ui warn "Timed out while $label (${limit}s limit)." >&2
+            kill -TERM "$active_pid" 2>/dev/null || :
+            sleep 0.2
+            kill -KILL "$active_pid" 2>/dev/null || :
+            wait "$active_pid" 2>/dev/null || :
+            timed_out=true
+            break
+        fi
+        if [[ $elapsed -ge $next_update ]]; then
+            ui warn "Still $label: ${elapsed}s elapsed, at most $((limit - elapsed))s left in this step." >&2
+            next_update=$((next_update + 5))
+        fi
+        sleep 0.1
+    done
+    if [[ $timed_out == true ]]; then status=75; else wait "$active_pid"; status=$?; fi
+    active_pid=
+    kill "$timer_pid" 2>/dev/null || :
+    wait "$timer_pid" 2>/dev/null || :
+    timer_pid=
+    if [[ -n $diagnostic_reader_pid ]]; then
+        if ! wait "$diagnostic_reader_pid"; then
+            diagnostic_failed=1
+            printf 'Warning: diagnostic stderr capture failed; the log may be incomplete.\n' >&2
+        fi
+        diagnostic_reader_pid=
+        hci_error=$(sed -nE 's/.* with error (0x[0-9a-fA-F]+).*/\1/p' "$work_dir/stderr" | tail -n 1)
+    fi
+    reply=$(cat "$work_dir/output")
+    diagnostic_event call_end --arg action "$1" --arg address "$address" \
+        --argjson exit_status "$status" --argjson timed_out "$timed_out" \
+        --argjson duration_s "$((SECONDS - started))" --arg hci_error "$hci_error"
+    if [[ $1 == --version && $status -eq 0 ]]; then
+        diagnostic_event dependency --arg blueutil_version "$reply"
+    fi
+    # blueutil exit 1 is generic: it does not reliably distinguish an absent
+    # accessory from authentication failure. Do not guess from human text.
+    case $status in
+        0|1|75) ;;
+        *)
+            global_failure=1
+            case $status in
+                134) printf 'Bluetooth API aborted (134). Check terminal access in Privacy & Security > Bluetooth.\n' >&2 ;;
+                69) printf 'Bluetooth or this operation is unavailable. Check Bluetooth settings and blueutil compatibility.\n' >&2 ;;
+                64) printf 'blueutil rejected the command. Check its version and supported options.\n' >&2 ;;
+                *) printf 'blueutil stopped with system/API error %s; stopping further repairs.\n' "$status" >&2 ;;
+            esac ;;
+    esac
+    return "$status"
+}
+
+validate_devices() {
+    jq -e 'type == "array" and all(.[];
+        (.address | type == "string") and
+        (.address | test("^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$")) and
+        (.name == null or (.name | type == "string")))' >/dev/null
+}
+if [[ $diagnose -eq 1 ]]; then
+    run_blueutil --version || fail 'Cannot read blueutil version for diagnostics'
+fi
+run_blueutil --paired --format json || fail 'Cannot read paired devices. Check Privacy & Security > Bluetooth permissions for your terminal.'
+paired=$reply
+printf '%s' "$paired" | validate_devices || fail 'blueutil returned an invalid device list'
+nearby='[]'
+if [[ $scan -eq 1 ]]; then
+    run_blueutil --power || fail 'Cannot read Bluetooth power state'
+    [[ $reply == 1 ]] || fail 'Bluetooth is off. Enable it in System Settings > Bluetooth, then scan again.'
+    ui info 'Scanning for nearby devices. Switch the Keyboard/Trackpad on now.'
+    ui info 'Discovery takes 10s; names may need longer (20s total limit). Only matching names will be selected.'
+    run_blueutil --inquiry 10 --format json || fail 'Discovery failed or timed out; no devices were changed. Retry --scan later or pair the new device via cable.'
+    nearby=$reply
+    printf '%s' "$nearby" | validate_devices || fail 'blueutil returned an invalid discovery list; no devices were changed'
+    ui info "Scan complete: $(printf '%s' "$nearby" | jq length) nearby device(s) seen."
+    diagnostic_event discovery --argjson device_count "$(printf '%s' "$nearby" | jq length)"
+fi
+cached='[]'
+if [[ -f $state_dir/devices.json ]]; then
+    cached=$(cat "$state_dir/devices.json") || fail 'Cannot read remembered devices'
+    printf '%s' "$cached" | validate_devices || fail "Invalid remembered devices: $state_dir/devices.json"
+fi
+# Retain addresses even when a previous run removed the local pairing.
+all_devices=$(jq -cn --argjson paired "$paired" --argjson nearby "$nearby" --argjson cached "$cached" '
+    ($nearby + $paired + $cached) | map(.address |= (ascii_downcase | gsub("-"; ":"))) |
+    reduce .[] as $d ([];
+        if any(.[]; .address == $d.address) then
+            map(if .address == $d.address and ((.name // "" | length) == 0)
+                then .name = $d.name else . end)
+        else . + [$d] end)') || fail 'Cannot merge devices'
+if [[ ${#addresses[@]} -gt 0 ]]; then
+    selectors=$(printf '%s\n' "${addresses[@]}" | jq -R . | jq -s 'unique')
+    selected=$(jq -cn --argjson all "$all_devices" --argjson ids "$selectors" '
+        $ids | map(. as $id | ([$all[] | select(.address == $id)][0] // {address:$id,name:$id}))')
+else
+    selectors=$(printf '%s\0' "${search_terms[@]}" | jq -Rsc 'split("\u0000")[:-1]')
+    selected=$(printf '%s' "$all_devices" | jq -c --argjson terms "$selectors" '
+        [.[] | select((.name // "" | ascii_downcase) as $name |
+            all($terms[]; . as $term | $name | contains($term | ascii_downcase)))]')
+fi
+[[ -n $selected ]] || fail 'Cannot select devices'
+count=$(printf '%s' "$selected" | jq length)
+[[ $count -gt 0 ]] || fail 'No matching devices. Use --scan for a new device, --search NAME or --device ADDRESS; cable pairing is another option.'
+printf 'magic-repair %s\n' "$VERSION"
+printf 'Selected %s device(s):\n' "$count"
+printf '%s' "$selected" | jq -r '.[] | "  \(.name // .address | @json) [\(.address)]"'
+if [[ $diagnose -eq 1 || -n ${MAGIC_REPAIR_UI_FD:-} ]]; then
+    diagnostic_event selection --argjson devices "$(printf '%s' "$selected" | jq -c 'map({address,name})')"
+fi
+[[ $list -eq 0 ]] || exit 0
+if [[ $preview -eq 1 ]]; then
+    if [[ $mode == repair ]]; then
+        printf 'Plan: skip connected devices unless --force; otherwise unpair locally, pair, connect and verify, one device at a time.\n'
+    else
+        printf 'Plan: disconnect, connect and verify each selected device; preserve pairing.\n'
+    fi
+    printf 'Limits: %ss total per device; up to %s state-aware recovery rounds.\n' "$timeout" "$attempts"
+    exit 0
+fi
+run_blueutil --power || fail 'Cannot read Bluetooth power state'
+[[ $reply == 1 ]] || fail 'Bluetooth is off. Enable it in System Settings > Bluetooth, then retry.'
+# Persist before any unpair, atomically. Never save a partial target list.
+state_tmp=$(mktemp "$state_dir/.devices.XXXXXXXX") || fail 'Cannot prepare remembered devices'
+if ! printf '%s\n' "$cached" | jq --argjson selected "$selected" '
+    (. + $selected) | map(.address |= (ascii_downcase | gsub("-"; ":"))) |
+    reduce .[] as $d ({}; .[$d.address] = {address:$d.address, name:$d.name}) |
+    [.[]]' > "$state_tmp" ||
+    ! mv "$state_tmp" "$state_dir/devices.json"; then
+    rm -f "$state_tmp"
+    fail 'Cannot remember devices; refusing to unpair'
+fi
+
+# Read both properties: an unauthenticated baseband connection alone is not
+# enough. Queries are local observations, not accessory reachability probes.
+read_device_state() {
+    local values
+    if ! run_blueutil --info "$1" --format json; then
+        [[ $global_failure -eq 0 ]] || return 2
+        return 1
+    fi
+    values=$(printf '%s' "$reply" | jq -er '
+        if type == "object" and (.paired | type == "boolean") and
+            (.connected | type == "boolean")
+        then "\(.paired) \(.connected)" else error("invalid device state") end') || {
+        printf '  Invalid device state from blueutil; refusing further changes to this device.\n' >&2
+        return 2
+    }
+    read -r state_paired state_connected <<< "$values"
+    diagnostic_event state --arg address "$1" --argjson paired "$state_paired" --argjson connected "$state_connected"
+}
+
+state_matches() {
+    case $1 in
+        ready) [[ $state_paired == true && $state_connected == true ]] ;;
+        paired) [[ $state_paired == true ]] ;;
+        unpaired) [[ $state_paired == false ]] ;;
+        disconnected) [[ $state_connected == false ]] ;;
+        *) return 1 ;;
+    esac
+}
+
+# Observe async completion before issuing another mutation. Never start a new
+# pair/connect operation inside this wait, and never extend the device deadline.
+wait_for_state() {
+    local mac=$1 target=$2 duration=$3 result=1 status
+    call_deadline=$((SECONDS + duration))
+    while [[ $SECONDS -lt $call_deadline && $SECONDS -lt $device_deadline ]]; do
+        read_device_state "$mac"; status=$?
+        if [[ $status -eq 2 ]]; then result=2; break; fi
+        if [[ $status -eq 0 ]] && state_matches "$target"; then result=0; break; fi
+        [[ $global_failure -eq 0 ]] || { result=2; break; }
+        if [[ $SECONDS -lt $call_deadline && $SECONDS -lt $device_deadline ]]; then sleep 1; fi
+    done
+    call_deadline=0
+    return "$result"
+}
+
+# One recovery round, continuing from observed state. Local pairing removal and
+# explicit reconnect disconnection happen at most once for a device in this run.
+attempt_device() {
+    local mac=$1 status
+    read_device_state "$mac" || return $?
+    if [[ ${device_prepared[$index]} -eq 0 ]]; then
+        if [[ $mode == repair ]]; then
+            if state_matches ready && [[ $force -eq 0 ]]; then
+                ui ok 'Already paired and connected to this Mac; skipping (use --force to renew).'
+                return 0
+            fi
+            if [[ $state_paired == true ]]; then
+                ui info 'Removing the stale local pairing once.'
+                run_blueutil --unpair "$mac" || :
+                [[ $global_failure -eq 0 ]] || return 2
+                wait_for_state "$mac" unpaired 3; status=$?
+                if [[ $status -ne 0 ]]; then
+                    [[ $status -ne 2 ]] || return 2
+                    printf '  Could not confirm local pairing removal. Try Forget This Device in Bluetooth settings.\n' >&2
+                    return 2
+                fi
             fi
         else
-            echo -e "${YELLOW}⚠️ Restarting bluetooth failed.${NC}"
-            echo ""
-            continue
+            if [[ $state_paired == false ]]; then
+                printf '  No local pairing. Run without --reconnect to pair this device.\n' >&2
+                return 2
+            fi
+            if [[ $state_connected == true ]]; then
+                ui info 'Refreshing the existing connection once.'
+                run_blueutil --disconnect "$mac" || :
+                [[ $global_failure -eq 0 ]] || return 2
+                wait_for_state "$mac" disconnected 3 || return 2
+            fi
+        fi
+        device_prepared[index]=1
+    fi
+    if state_matches ready; then return 0; fi
+    if [[ $state_paired == false ]]; then
+        [[ $mode == repair ]] || return 2
+        ui info "Pairing (up to ${pair_timeout}s; respond to any displayed pairing prompt)."
+        run_blueutil --pair "$mac" || :
+        [[ $global_failure -eq 0 ]] || return 2
+        # Even a timeout/failure can have side effects in the Bluetooth daemon.
+        wait_for_state "$mac" paired 2; status=$?
+        if [[ $status -ne 0 ]]; then
+            [[ $status -ne 2 ]] || return 2
+            ui warn 'Pairing not confirmed. If this device is not available, switch it off/on now.' >&2
+            return 1
         fi
     fi
-
-    if ! connect_with_retries "$mac" "$name"; then
-        echo -e "\t${RED}❌ Connecting ${name} failed.${NC}"
+    if state_matches ready; then return 0; fi
+    ui info 'Connecting (up to 8s).'
+    run_blueutil --connect "$mac" || :
+    [[ $global_failure -eq 0 ]] || return 2
+    wait_for_state "$mac" ready 2; status=$?
+    if [[ $status -eq 1 ]]; then
+        printf '  Paired connection not confirmed; the next round will recheck before doing anything.\n' >&2
     fi
-    echo ""
-done
+    return "$status"
+}
 
-echo -e "${GREEN}🎉 Successfully re-paired your bluetooth devices.${NC}"
+succeeded=0
+failed=0
+device_prepared=()
+device_deadlines=()
+device_results=()
+retry_at=()
+for ((index=0; index<count; index++)); do
+    device_prepared[index]=0
+    device_deadlines[index]=0
+    device_results[index]=pending
+    retry_at[index]=0
+done
+printf '\nRecovery budget: up to %ss per device from its first attempt; at most %s rounds. Ctrl-C cancels.\n' "$timeout" "$attempts"
+# All targets get a first attempt before retries, so an absent accessory does
+# not consume its entire retry budget before the other accessory is tried.
+for ((round=1; round<=attempts; round++)); do
+    for ((index=0; index<count; index++)); do
+        [[ ${device_results[$index]} == pending ]] || continue
+        mac=$(printf '%s' "$selected" | jq -r ".[$index].address")
+        name=$(printf '%s' "$selected" | jq -c ".[$index].name // .[$index].address")
+        if [[ ${device_deadlines[$index]} -eq 0 ]]; then
+            device_deadlines[index]=$((SECONDS + timeout))
+        fi
+        device_deadline=${device_deadlines[$index]}
+        diagnostic_event device --arg address "$mac" --argjson round "$round" \
+            --argjson remaining_s "$((device_deadline - SECONDS))"
+        printf '\nDevice %s/%s: %s\n' "$((index + 1))" "$count" "$name"
+        ui info "Round $round/$attempts | $mac"
+        status=1
+        if [[ $SECONDS -lt $device_deadline ]]; then
+            remaining_delay=$((retry_at[index] - SECONDS))
+            if [[ $remaining_delay -gt 0 ]]; then
+                ui warn "Allowing up to ${remaining_delay}s for Bluetooth to settle; watching for completion."
+                if [[ ${device_prepared[$index]} -eq 1 ]]; then wait_target=ready; else wait_target=settle; fi
+                wait_for_state "$mac" "$wait_target" "$remaining_delay"; status=$?
+            fi
+            if [[ $status -eq 1 && $SECONDS -lt $device_deadline ]]; then
+                ui info "Up to $((device_deadline - SECONDS))s left in this device budget."
+                attempt_device "$mac"; status=$?
+            fi
+        fi
+        if [[ $status -eq 0 ]]; then
+            device_results[index]=success
+            succeeded=$((succeeded + 1))
+            ui ok 'Paired and connected.'
+            diagnostic_event device_result --arg address "$mac" --arg outcome ready
+        elif [[ $status -eq 2 || $round -eq $attempts || $SECONDS -ge $device_deadline ]]; then
+            device_results[index]=failed
+            failed=$((failed + 1))
+            if [[ $SECONDS -ge $device_deadline ]]; then ui error 'Device time budget exhausted.' >&2; fi
+            ui error "Failed to restore $mac." >&2
+            diagnostic_event device_result --arg address "$mac" --arg outcome failed
+        else
+            if [[ $round -eq 1 ]]; then delay=2; else delay=5; fi
+            retry_at[index]=$((SECONDS + delay))
+            ui warn "Retry in ${delay}s or after other devices have had their turn."
+            diagnostic_event device_result --arg address "$mac" --arg outcome retry --argjson retry_after_s "$delay"
+        fi
+        if [[ $global_failure -ne 0 ]]; then break 2; fi
+    done
+done
+# A controller/API failure applies to every remaining device, not just one MAC.
+for ((index=0; index<count; index++)); do
+    if [[ ${device_results[$index]} == pending ]]; then
+        failed=$((failed + 1))
+        mac=$(printf '%s' "$selected" | jq -r ".[$index].address")
+        printf '  Not completed: %s (repairs stopped after a Bluetooth/API failure).\n' "$mac" >&2
+        diagnostic_event device_result --arg address "$mac" --arg outcome not_attempted
+    fi
+done
+device_deadline=0
+printf '\nResult: %s connected, %s failed (%ss elapsed).\n' "$succeeded" "$failed" "$((SECONDS - run_started))"
+diagnostic_event result --argjson connected "$succeeded" --argjson failed "$failed" \
+    --argjson duration_s "$((SECONDS - run_started))" --argjson global_failure "$global_failure"
+for ((index=0; index<count; index++)); do
+    name=$(printf '%s' "$selected" | jq -c ".[$index].name // .[$index].address")
+    if [[ ${device_results[$index]} == success ]]; then
+        ui ok "$name"
+    else
+        ui error "$name" >&2
+    fi
+done
+if [[ $failed -gt 0 ]]; then
+    if [[ $global_failure -ne 0 ]]; then
+        ui error 'Resolve the Bluetooth/API error above, then run again. Saved target addresses are kept.' >&2
+        exit 1
+    fi
+    cat >&2 <<'HELP'
+Switch the devices off and on, then retry on this Mac.
+If the other Mac immediately reconnects, a local-only script cannot force it
+to release them. A coordinated switch or cable pairing can avoid this race.
+For rechargeable Magic devices, connect a USB/Lightning cable to this Mac for
+one minute, then unplug it. Check terminal Bluetooth permissions and battery.
+Remembered addresses allow you to retry even after local pairing was removed.
+HELP
+    exit 1
+fi

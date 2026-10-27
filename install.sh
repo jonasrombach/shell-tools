@@ -32,6 +32,36 @@ is_in_path() {
     esac
 }
 
+# Only installation may invoke a package manager; repair runs stay offline.
+install_dependencies() {
+    if [[ $(uname -s) != Darwin ]]; then
+        echo "These tools require macOS." >&2
+        exit 1
+    fi
+    local missing=() dependency brew_prefix
+    for dependency in blueutil jq; do
+        command -v "$dependency" >/dev/null 2>&1 || missing+=("$dependency")
+    done
+    if ! command -v python3 >/dev/null 2>&1 ||
+       ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+        missing+=(python)
+    fi
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            echo "Install Homebrew from https://brew.sh, open a new terminal, then rerun ./install.sh." >&2
+            echo "Missing dependencies: ${missing[*]}" >&2
+            exit 1
+        fi
+        brew install "${missing[@]}"
+        # Prefer Homebrew Python over an older macOS/developer-tools copy.
+        if [[ " ${missing[*]} " == *" python "* ]]; then
+            brew_prefix="$(brew --prefix)"
+            export PATH="$brew_prefix/bin:$PATH"
+        fi
+    fi
+    /bin/bash "$SCRIPTS_DIR/lib/magic-repair/setup-ui"
+}
+
 # Function to detect shell and get profile file
 get_shell_profile() {
     local shell_name
@@ -39,16 +69,19 @@ get_shell_profile() {
     
     case "$shell_name" in
         bash)
-            if [[ -f "$HOME/.bashrc" ]]; then
-                echo "$HOME/.bashrc"
-            elif [[ -f "$HOME/.bash_profile" ]]; then
+            # macOS terminal windows normally start login shells.
+            if [[ -f "$HOME/.bash_profile" ]]; then
                 echo "$HOME/.bash_profile"
+            elif [[ -f "$HOME/.bash_login" ]]; then
+                echo "$HOME/.bash_login"
+            elif [[ -f "$HOME/.profile" ]]; then
+                echo "$HOME/.profile"
             else
-                echo "$HOME/.bashrc"
+                echo "$HOME/.bash_profile"
             fi
             ;;
         zsh)
-            echo "$HOME/.zshrc"
+            echo "${ZDOTDIR:-$HOME}/.zshrc"
             ;;
         fish)
             echo "$HOME/.config/fish/config.fish"
@@ -63,7 +96,14 @@ get_shell_profile() {
 add_to_path() {
     local shell_profile
     shell_profile="$(get_shell_profile)"
-    local path_line="export PATH=\"$SCRIPTS_DIR:\$PATH\""
+    local quoted_dir path_line
+    # Shell-quote paths, including spaces, quotes and dollar signs.
+    quoted_dir="'$(printf '%s' "$SCRIPTS_DIR" | sed "s/'/'\\\\''/g")'"
+    if [[ $(basename "$SHELL") == fish ]]; then
+        path_line="fish_add_path $quoted_dir"
+    else
+        path_line="export PATH=$quoted_dir:\$PATH"
+    fi
     
     echo -e "${BLUE}📦 Adding scripts directory to PATH...${NC}"
     
@@ -74,7 +114,7 @@ add_to_path() {
     fi
     
     # Check if the line already exists in the profile
-    if [[ -f "$shell_profile" ]] && grep -q "export PATH.*$SCRIPTS_DIR" "$shell_profile"; then
+    if [[ -f "$shell_profile" ]] && grep -Fq -- "$path_line" "$shell_profile"; then
         echo -e "${GREEN}✅ PATH export already exists in $shell_profile${NC}"
         echo -e "${YELLOW}💡 Restart your terminal or run: source $shell_profile${NC}"
         return 0
@@ -118,6 +158,9 @@ show_usage() {
     echo ""
     echo "This script adds the shell-tools scripts directory to your PATH,"
     echo "making all scripts accessible from the command line without copying them."
+    echo "It also installs the Magic Repair UI dependencies in an isolated environment."
+    echo "Missing blueutil, jq and Python 3.10+ are installed using Homebrew."
+    echo "Install Homebrew first from https://brew.sh if needed."
     echo ""
     echo "Options:"
     echo "  --help      Show this help message"
@@ -142,7 +185,8 @@ main() {
             echo ""
             # Ensure all scripts are executable
             echo -e "${BLUE}🔑 Ensuring all scripts are executable...${NC}"
-            chmod +x "$SCRIPTS_DIR"/*
+            chmod +x "$SCRIPTS_DIR/magic-repair" "$SCRIPTS_DIR/mirror-repair"
+            install_dependencies
             add_to_path
             ;;
         *)

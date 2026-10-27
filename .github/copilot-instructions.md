@@ -28,16 +28,22 @@ The primary goal is to create terminal tools that:
 ## Example Tool
 
 ### magic-repair (Example Implementation)
-**Problem**: Apple Magic devices (Keyboard, Trackpad, Mouse) don't support multidevice connection. When you pair a Magic device with Device A and then with Device B, it stops working on Device A. To fix this, users must manually disconnect all devices through Bluetooth settings, wait for them to appear for pairing, and reconnect them.
+**Problem**: Switching the same Apple Magic accessories between a personal and a work Mac can leave stale local Bluetooth pairings. The intended workflow is to power-cycle the accessories and run `magic-repair` on the desired Mac, without manually disconnecting on the other Mac or installing a companion app.
 
 **Solution**: A bash script that automates this entire process with a single command: `magic-repair`
 
 **Key Features**:
-- Searches for paired Magic devices containing "Magic" and a user-configurable name (e.g., "Jonas") in the name
-- Unpairs all matching devices in parallel for efficiency
-- Re-pairs and connects devices sequentially with retry logic
-- Provides clear visual feedback with colors and emojis
-- Handles errors with helpful suggestions (restart Bluetooth, toggle devices)
+- Selects names containing all literal search terms (default: "Magic" and "Jonas")
+- Remembers selected addresses before changes, allowing recovery after failed pairing
+- Includes unpaired discoverable devices with the explicit `--scan` option
+- Removes stale local pairing at most once per device, then recovers from observed pairing/connection state
+- Gives every target a first attempt before retries, within bounded per-device and per-call time limits
+- Processes pairing operations sequentially to keep confirmation/PIN input unambiguous
+- Supports read-only preview/list modes and private opt-in JSONL diagnostics without PINs or typed input
+- Uses a Rich dashboard by default in terminals, with automatic text output for redirected streams
+- Keeps presentation in `scripts/lib/magic-repair/ui.py`; the Bash engine emits small JSON events
+- Leaves stdin with the engine and pauses redraws for pairing prompts; respects `NO_COLOR`
+- Does not reset the global Bluetooth controller or require remote access to the other Mac
 
 ## Coding Standards and Patterns
 
@@ -134,8 +140,12 @@ When adding new dependencies:
 - Prefer tools available via Homebrew
 - Always check for availability and provide installation instructions
 - Document dependencies in script comments
+- Keep task-relevant Homebrew dependencies current during maintenance; verify versions and compatibility after updates
+- Do not run package updates inside Bluetooth repair operations
 
 ## Testing
+
+For magic-repair, run the standard-library Python behavior suite, Bash syntax checks and ShellCheck documented in README.md. Tests substitute blueutil and never mutate real Bluetooth. Exercise macOS Bash 3.2 and the current Homebrew Bash when changing process handling. Live hardware tests belong to the user's requested test session.
 
 Test all scripts on:
 - Different macOS versions when possible

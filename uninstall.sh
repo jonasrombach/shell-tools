@@ -23,16 +23,18 @@ get_shell_profile() {
     
     case "$shell_name" in
         bash)
-            if [[ -f "$HOME/.bashrc" ]]; then
-                echo "$HOME/.bashrc"
-            elif [[ -f "$HOME/.bash_profile" ]]; then
+            if [[ -f "$HOME/.bash_profile" ]]; then
                 echo "$HOME/.bash_profile"
+            elif [[ -f "$HOME/.bash_login" ]]; then
+                echo "$HOME/.bash_login"
+            elif [[ -f "$HOME/.profile" ]]; then
+                echo "$HOME/.profile"
             else
-                echo "$HOME/.bashrc"
+                echo "$HOME/.bash_profile"
             fi
             ;;
         zsh)
-            echo "$HOME/.zshrc"
+            echo "${ZDOTDIR:-$HOME}/.zshrc"
             ;;
         fish)
             echo "$HOME/.config/fish/config.fish"
@@ -45,8 +47,9 @@ get_shell_profile() {
 
 # Function to remove PATH from shell profile
 remove_from_path() {
-    local shell_profile
+    local shell_profile quoted_dir
     shell_profile="$(get_shell_profile)"
+    quoted_dir="'$(printf '%s' "$SCRIPTS_DIR" | sed "s/'/'\\\\''/g")'"
     
     echo -e "${BLUE}🗑️  Removing scripts directory from PATH...${NC}"
     
@@ -56,7 +59,8 @@ remove_from_path() {
     fi
     
     # Check if the PATH export exists
-    if ! grep -q "export PATH.*$SCRIPTS_DIR" "$shell_profile"; then
+    if ! grep -Fq -- "$SCRIPTS_DIR" "$shell_profile" &&
+       ! grep -Fq -- "$quoted_dir" "$shell_profile"; then
         echo -e "${YELLOW}ℹ️  No shell-tools PATH entry found in $shell_profile${NC}"
         return 0
     fi
@@ -65,14 +69,14 @@ remove_from_path() {
     cp "$shell_profile" "$shell_profile.backup.$(date +%s)"
     echo -e "${BLUE}📋 Created backup: $shell_profile.backup.$(date +%s)${NC}"
     
-    # Remove the shell-tools lines
-    # Remove the comment line and the export line
-    sed -i.tmp '/# Added by shell-tools install script/,+1d' "$shell_profile"
-    rm "$shell_profile.tmp" 2>/dev/null || true
-    
-    # Also remove any standalone export lines (in case comment was removed manually)
-    sed -i.tmp "\|export PATH.*$SCRIPTS_DIR|d" "$shell_profile"
-    rm "$shell_profile.tmp" 2>/dev/null || true
+    # Match both older exports and the installer's shell-quoted path literally.
+    SHELL_TOOLS_PATH="$SCRIPTS_DIR" SHELL_TOOLS_QUOTED_PATH="$quoted_dir" awk '
+        $0 == "# Added by shell-tools install script" { next }
+        /^(export PATH=|fish_add_path )/ && (index($0, ENVIRON["SHELL_TOOLS_PATH"]) || index($0, ENVIRON["SHELL_TOOLS_QUOTED_PATH"])) { next }
+        { print }
+    ' "$shell_profile" > "$shell_profile.tmp"
+    cat "$shell_profile.tmp" > "$shell_profile"
+    rm "$shell_profile.tmp"
     
     echo -e "${GREEN}✅ Removed shell-tools from PATH in $shell_profile${NC}"
     echo -e "${YELLOW}💡 Restart your terminal or run: source $shell_profile${NC}"
