@@ -6,8 +6,8 @@ MacOS specific tools that make life easier.
 ### Quick Install
 ```bash
 # Clone the repository
-git clone https://github.com/jonasrombach/terminal-tools.git
-cd terminal-tools
+git clone https://github.com/jonasrombach/shell-tools.git
+cd shell-tools
 
 # Install (sets up the terminal UI and adds scripts to PATH)
 ./install.sh
@@ -60,7 +60,7 @@ can be rerun to refresh the UI dependencies without duplicating the PATH entry.
 ### Updating
 Since scripts remain in the repository, updating is simple:
 ```bash
-cd terminal-tools
+cd shell-tools
 git pull origin main
 ./install.sh  # Also refresh isolated UI dependencies and check prerequisites
 ```
