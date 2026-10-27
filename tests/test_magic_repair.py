@@ -94,6 +94,7 @@ class MagicRepairTests(unittest.TestCase):
         self.save()
         self.env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
                         XDG_STATE_HOME=str(self.root / 'state'),
+                        XDG_DATA_HOME=str(self.root / 'data'),
                         MAGIC_REPAIR_UI_ACTIVE='1',
                         FAKE_STATE=str(self.state), FAKE_LOG=str(self.log))
 
@@ -117,6 +118,28 @@ class MagicRepairTests(unittest.TestCase):
         self.assertEqual([a[0] for a in self.mutations()], ['--unpair', '--pair', '--connect'])
         self.assertIn(['--info', MAC, '--format', 'json'], self.calls())
         self.assertIn('1 connected, 0 failed', result.stdout)
+
+    def test_permission_denied_stops_before_bluetooth_or_pairing(self):
+        permission_python = self.root / 'data/shell-tools/magic-repair-ui/bin/python'
+        permission_python.parent.mkdir(parents=True)
+        permission_python.write_text('#!/bin/bash\nprintf "denied\\n"\n')
+        permission_python.chmod(0o755)
+        result = self.run_tool('--diagnose')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual([a[0] for a in self.calls()], ['--version'])
+        events = self.diagnostic_events()
+        self.assertTrue(any(e['event'] == 'failure' and e['reason'] == 'bluetooth_access' for e in events))
+        self.assertIn('Quit and reopen', result.stderr)
+
+    def test_api_abort_reports_access_failure_before_selection(self):
+        self.data.update(fail='--paired', fail_code=134)
+        self.save()
+        result = self.run_tool('--diagnose')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.mutations(), [])
+        events = self.diagnostic_events()
+        self.assertTrue(any(e['event'] == 'failure' and e['reason'] == 'bluetooth_access' for e in events))
+        self.assertFalse(any(e['event'] == 'selection' for e in events))
 
     def test_search_works_as_first_selector_and_overrides_config(self):
         result = self.run_tool('-s', 'trackpad')

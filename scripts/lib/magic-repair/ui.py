@@ -28,7 +28,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-VERSION = '3.0.0'
+VERSION = '3.0.1'
 BG = '#101827'
 CARD = '#162135'
 INK = '#edf2fb'
@@ -94,6 +94,9 @@ class Dashboard:
         self.demo = '--demo' in args
         self.log_path = ''
         self.exit_status: int | None = None
+        self.permission = ''
+        self.failure_reason = ''
+        self.failure_message = ''
 
     def consume(self, event: dict):
         now = self.clock()
@@ -102,6 +105,11 @@ class Dashboard:
         device = self.devices.get(address)
         if kind == 'run_start':
             self.log_path = event.get('log_path', '')
+        elif kind == 'permission':
+            self.permission = event['state']
+        elif kind == 'failure':
+            self.failure_reason = event['reason']
+            self.failure_message = clean(event['message'])
         elif kind == 'selection':
             for item in event['devices']:
                 address = item['address']
@@ -224,6 +232,7 @@ class Dashboard:
         finished = self.finished_at is not None
         success = finished and self.exit_status == 0
         cancelled = self.exit_status in (130, 143)
+        access_blocked = finished and not cancelled and self.failure_reason == 'bluetooth_access'
         color = MINT if success and not self.preview else AMBER if cancelled else ROSE if finished and not success else VIOLET
         header = Table.grid(expand=True)
         header.add_column(ratio=1)
@@ -243,10 +252,17 @@ class Dashboard:
             subtitle = f'{ready} of {len(self.devices)} devices connected · {self.elapsed:.1f}s total' if not self.preview else f'{len(self.devices)} matching devices · nothing changed'
         elif cancelled:
             title, subtitle = 'Paused by you.', 'Your saved devices are ready for another attempt.'
+        elif access_blocked:
+            title = 'Bluetooth access needs attention.'
+            subtitle = 'Check permission for the app hosting this terminal.'
+        elif finished and not self.devices:
+            title, subtitle = 'Couldn’t start the handoff.', self.failure_message or 'See the error above before trying again.'
         elif finished:
             title = 'Let’s finish the connection.'
             ready = sum(d.status == 'ready' for d in self.devices.values())
             subtitle = f'{ready} of {len(self.devices)} devices connected · the rest can be retried'
+        elif self.permission == 'checking':
+            title, subtitle = 'Allow Bluetooth access.', 'If macOS asks, choose Allow. We’ll continue automatically.'
         elif self.scanning and not self.scan_finished:
             title, subtitle = 'Finding your devices.', 'Switch your Keyboard or Trackpad on now.'
         elif self.devices:
@@ -255,7 +271,19 @@ class Dashboard:
             title, subtitle = 'A little magic. All connected.', 'Checking your saved devices and Bluetooth.'
         hero = Group(text(eyebrow, f'bold {color}'), text(title, f'bold {INK}'), text(subtitle, MUTED))
         items = list(self.devices.values())
-        if items and not narrow and len(items) == 2:
+        if access_blocked:
+            link = text('Open Bluetooth privacy settings', f'bold {VIOLET}')
+            link.stylize('link x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth')
+            cards = Panel(Group(
+                link,
+                text('System Settings → Privacy & Security → Bluetooth', MUTED),
+                text('1  Enable your terminal app (e.g. WezTerm).', INK),
+                text('2  Quit and reopen the app, then run magic-repair.', INK),
+                text('App missing? Add it with + if available. Managed setting? Contact your administrator.', MUTED),
+            ), box=box.ROUNDED, border_style=AMBER, style=f'{INK} on {CARD}', padding=(1, 2))
+        elif finished and not items:
+            cards = text('No devices were checked.', MUTED)
+        elif items and not narrow and len(items) == 2:
             cards = Table.grid(expand=True, padding=(0, 1))
             cards.add_column(ratio=1)
             cards.add_column(ratio=1)
@@ -274,7 +302,7 @@ class Dashboard:
         footer.add_column(ratio=1)
         footer.add_column(justify='right')
         if finished:
-            footer.add_row(text('✓  All set.' if success and not self.preview else '◇  Preview complete.' if success else '↻  Run magic-repair to retry.', color), text(f'{self.elapsed:.1f}s', MUTED))
+            footer.add_row(text('✓  All set.' if success and not self.preview else '◇  Preview complete.' if success else '◇  Resolve access, then run again.' if access_blocked else '↻  Run magic-repair to retry.', color), text(f'{self.elapsed:.1f}s', MUTED))
         else:
             footer.add_row(text(f'{self.pulse()}  Working locally', MUTED), text('CTRL C  Cancel', MUTED))
         contents = [header, text(''), hero, text(''), cards, text(''), footer]
@@ -283,6 +311,11 @@ class Dashboard:
         estimated_height = 13 + (5 * len(items) if narrow else 5)
         if width < 40 or height < min(estimated_height, 24):
             rows = [header, text(title, f'bold {color}')]
+            if access_blocked:
+                rows += [text('Settings → Privacy & Security → Bluetooth', MUTED),
+                         text('Enable your terminal app. Quit and reopen it.', INK)]
+            elif finished and not items:
+                rows += [text(subtitle, MUTED)]
             for device in items:
                 rows += [text(device.name, INK, overflow='ellipsis', no_wrap=True),
                          text(f'  {device.status.upper()}', MINT if device.status == 'ready' else VIOLET)]
@@ -392,7 +425,7 @@ def run_engine(engine: str, args: list[str], console: Console, engine_shell: str
                         line, event_buffer = event_buffer.split(b'\n', 1)
                         event = json.loads(line)
                         model.consume(event)
-                        if event.get('event') == 'call_end':
+                        if event.get('event') == 'call_end' or event.get('event') == 'permission' and event['state'] != 'checking':
                             view.resume()
             view.refresh()
         status = process.wait()

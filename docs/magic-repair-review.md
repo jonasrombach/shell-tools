@@ -287,3 +287,41 @@ modify live Bluetooth or the user's shell profile. All 57 engine behavior tests,
 ShellCheck, Bash syntax checks and `pip check` passed. This isolates installation
 from existing user state; it does not substitute for hardware testing on a
 second physical Mac.
+
+## Native Bluetooth consent (3.0.1)
+
+A fresh installation succeeded but blueutil aborted with 134 before discovery
+in the user's terminal. blueutil documents this as a possible Bluetooth API
+access failure, not a definitive permission result. The previous final dashboard
+incorrectly showed 0 of 0 connected and an ordinary retry instruction.
+
+An isolated PyObjC CoreBluetooth bridge now checks Apple's `CBManager.authorization`
+before discovery. For an interactive, undecided request it creates a
+`CBCentralManager`, runs the native event loop and observes authorization for up
+to 60 seconds, without scanning or changing controller power. It suppresses the
+separate power alert. Allowed access continues in the same run; denied,
+restricted or unanswered access stops before device changes. Redirected sessions
+only check status. Consent is checked each time rather than cached on disk.
+The responsible terminal/host app may differ between execution contexts.
+
+The dashboard now has an access-specific final state with instructions and a
+Bluetooth privacy settings link. Other early failures also avoid the misleading
+empty-device result. Neither installation nor the tool grants access itself,
+resets privacy decisions, or bypasses organization policy. Denied access requires
+Settings; restricted access may require an administrator.
+
+Sources: [Apple authorization states](https://developer.apple.com/documentation/corebluetooth/cbmanagerauthorization),
+[authorization before creating a manager](https://developer.apple.com/documentation/corebluetooth/cbmanager/authorization-swift.type.property),
+[central manager initialization](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/init(delegate:queue:options:)),
+[Apple privacy controls](https://support.apple.com/guide/mac-help/mchl211c911f/mac),
+[blueutil exit codes](https://github.com/toy/blueutil),
+[maintainer on ancestor-app permission attribution](https://github.com/toy/blueutil/issues/85),
+and [PyObjC CoreBluetooth bridge](https://pyobjc.readthedocs.io/en/latest/apinotes/CoreBluetooth.html).
+
+Validation covers decided/pending authorization, successful consent, bounded
+waiting, engine denial before discovery, fallback abort handling and failure
+layouts at 100×32, 80×24, 50×20 and 32×12. An actual engine-to-renderer denial
+check verified exit 1, lock cleanup and no device-state writes. The native bridge
+reported allowed in the agent's existing execution context. A fresh user consent
+dialog in WezTerm still needs live confirmation; no privacy permissions were reset
+for automated testing.

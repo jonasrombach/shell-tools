@@ -28,7 +28,9 @@ On the second Mac, start with `magic-repair --scan --dry-run` to check the
 matching devices, then power-cycle the accessories and run
 `magic-repair --scan` to pair them. If discovery cannot find an accessory,
 pair it once using a cable or macOS Bluetooth settings, then run `magic-repair`.
-Grant the terminal Bluetooth permission when macOS asks. The bundled name filter
+The first interactive run checks Bluetooth authorization and, if undecided,
+requests native macOS consent. Choose **Allow** to continue automatically.
+The bundled name filter
 is **Magic + Jonas**; change it as described below if needed.
 
 Each Mac keeps its own remembered devices, settings and diagnostics. They are
@@ -54,7 +56,8 @@ The installation script adds the repository's `scripts` directory to your PATH b
 The script will automatically detect your shell and add the scripts directory to your PATH.
 It also installs Rich for Magic Repair in an isolated environment under
 `~/.local/share/shell-tools/magic-repair-ui` (respecting `XDG_DATA_HOME`).
-Python 3.10+ is required; system Python packages are not changed. Installation
+Python 3.10+ and macOS 10.15+ are required; system Python packages are not changed. PyObjC's
+CoreBluetooth bridge is also installed there for native permission handling. Installation
 can be rerun to refresh the UI dependencies without duplicating the PATH entry.
 
 ### Updating
@@ -85,7 +88,7 @@ or access to the other Mac is needed.
 **Dependencies:**
 - `blueutil` (install with `brew install blueutil`)
 - `jq` (install with `brew install jq`)
-- Python 3.10+ and Rich 15+ (the installer sets up Rich in an isolated environment)
+- Python 3.10+, Rich 15+ and PyObjC CoreBluetooth (installed in an isolated environment)
 
 **Usage:**
 ```bash
@@ -222,9 +225,26 @@ checking that no repair is running.
 from reconnecting first. Power-cycling is the normal switching step; manual
 disconnection on the other Mac is not a prerequisite. If pairing still fails,
 connect rechargeable Magic devices to this Mac by USB/Lightning for one minute,
-then unplug them. macOS may require pairing confirmation or a PIN. Grant your
-terminal access in **System Settings → Privacy & Security → Bluetooth** when
-requested. Bluetooth connection checks cannot prove that keys or gestures work.
+then unplug them. macOS may require pairing confirmation or a PIN.
+Bluetooth connection checks cannot prove that keys or gestures work.
+
+**Bluetooth permissions:** An interactive run requests native consent only when
+macOS reports that access has not been decided. Choose **Allow**; the tool waits
+up to 60 seconds before any device discovery or pairing. This does not scan,
+change Bluetooth power or remove pairings, and the wait does not consume a
+device's repair budget. `--demo` and `--help` do not request access. Noninteractive
+runs check authorization without opening a consent dialog.
+
+If access was denied, enable the app hosting the command (e.g. WezTerm, Terminal,
+or the app containing an integrated terminal) in **System Settings → Privacy &
+Security → Bluetooth**, then quit and reopen that app. If it is missing, use
+the **+** button to add the app if your macOS version offers it. Consent belongs
+to the responsible application, so allowing one terminal does not necessarily
+allow another. The dashboard links to the settings pane and stops further
+Bluetooth work rather than retrying a denied request. Corporate restrictions
+may require your administrator. The installer cannot grant permission itself;
+it sets up dependencies without requesting Bluetooth access. An abort with
+code 134 may indicate denied API access, but is not proof of its cause.
 
 Exit status is `0` when all targets are connected, `1` for discovery or repair
 failure (including partial success), and `2` for invalid arguments or config.

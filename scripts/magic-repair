@@ -4,7 +4,7 @@
 set -o pipefail
 run_started=$SECONDS
 
-VERSION=3.0.0
+VERSION=3.0.1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Terminals use the dashboard; redirected output stays append-only text.
 ui_python="${XDG_DATA_HOME:-$HOME/.local/share}/shell-tools/magic-repair-ui/bin/python"
@@ -49,6 +49,7 @@ pair_timeout_explicit=0
 device_deadline=0
 call_deadline=0
 global_failure=0
+failure_reason=
 state_paired=false
 state_connected=false
 active_pid=
@@ -106,7 +107,11 @@ or keyboard input. --diagnose writes a log even with --dry-run or --list.
 HELP
 }
 
-fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+fail() {
+    diagnostic_event failure --arg reason "${failure_reason:-setup}" --arg message "$*"
+    printf 'Error: %s\n' "$*" >&2
+    exit 1
+}
 usage_error() { printf 'Error: %s\nUse --help for usage.\n' "$*" >&2; exit 2; }
 need_value() { [[ $# -ge 2 && -n $2 && $2 != -* ]] || usage_error "$1 requires a value"; }
 # Structured append-only events, kept separate from terminal output. Numeric
@@ -381,7 +386,10 @@ run_blueutil() {
         *)
             global_failure=1
             case $status in
-                134) printf 'Bluetooth API aborted (134). Check terminal access in Privacy & Security > Bluetooth.\n' >&2 ;;
+                134)
+                    failure_reason=bluetooth_access
+                    diagnostic_event failure --arg reason "$failure_reason" --arg message 'Bluetooth API aborted (134); access may be denied.'
+                    printf 'Bluetooth API aborted (134); access may be denied.\nEnable your terminal app in System Settings > Privacy & Security > Bluetooth.\nQuit and reopen that app, then run magic-repair again.\n' >&2 ;;
                 69) printf 'Bluetooth or this operation is unavailable. Check Bluetooth settings and blueutil compatibility.\n' >&2 ;;
                 64) printf 'blueutil rejected the command. Check its version and supported options.\n' >&2 ;;
                 *) printf 'blueutil stopped with system/API error %s; stopping further repairs.\n' "$status" >&2 ;;
@@ -398,6 +406,26 @@ validate_devices() {
 }
 if [[ $diagnose -eq 1 ]]; then
     run_blueutil --version || fail 'Cannot read blueutil version for diagnostics'
+fi
+# CoreBluetooth can request consent gracefully, before IOBluetooth/blueutil aborts.
+# No prompting in redirected/noninteractive sessions. No persistent permission cache.
+if [[ -x $ui_python ]]; then
+    permission_args=()
+    if [[ -t 0 && ( -t 1 && -t 2 || -n ${MAGIC_REPAIR_UI_FD:-} ) ]]; then permission_args+=(--request); fi
+    diagnostic_event permission --arg state checking
+    "$ui_python" "$SCRIPT_DIR/lib/magic-repair/permissions.py" "${permission_args[@]}" > "$work_dir/permission" &
+    active_pid=$!
+    if wait "$active_pid"; then permission_status=$(cat "$work_dir/permission"); else permission_status=unavailable; fi
+    active_pid=
+    diagnostic_event permission --arg state "$permission_status"
+    case $permission_status in
+        allowed) ;;
+        denied|restricted|not_determined|timed_out)
+            failure_reason=bluetooth_access
+            printf 'Bluetooth authorization: %s.\nEnable your terminal app in System Settings > Privacy & Security > Bluetooth.\nIf the app is missing, add it using + if available. Quit and reopen the app, then rerun magic-repair.\nIf settings are managed by your organization, contact your administrator.\n' "$permission_status" >&2
+            fail 'Bluetooth access is required before devices can be checked.' ;;
+        *) fail 'Cannot check Bluetooth permission. Rerun ./install.sh to refresh the dependencies.' ;;
+    esac
 fi
 run_blueutil --paired --format json || fail 'Cannot read paired devices. Check Privacy & Security > Bluetooth permissions for your terminal.'
 paired=$reply
