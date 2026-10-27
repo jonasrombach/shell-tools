@@ -28,8 +28,9 @@ On the second Mac, start with `magic-repair --scan --dry-run` to check the
 matching devices, then power-cycle the accessories and run
 `magic-repair --scan` to pair them. If discovery cannot find an accessory,
 pair it once using a cable or macOS Bluetooth settings, then run `magic-repair`.
-The first interactive run checks Bluetooth authorization and, if undecided,
-requests native macOS consent. Choose **Allow** to continue automatically.
+The first run checks Bluetooth authorization. If access is missing, an
+interactive run opens the Bluetooth privacy settings. Enable or add the app
+hosting the command, then quit and reopen that app before running again.
 The bundled name filter
 is **Magic + Jonas**; change it as described below if needed.
 
@@ -57,7 +58,7 @@ The script will automatically detect your shell and add the scripts directory to
 It also installs Rich for Magic Repair in an isolated environment under
 `~/.local/share/shell-tools/magic-repair-ui` (respecting `XDG_DATA_HOME`).
 Python 3.10+ and macOS 10.15+ are required; system Python packages are not changed. PyObjC's
-CoreBluetooth bridge is also installed there for native permission handling. Installation
+CoreBluetooth bridge is also installed there to read authorization safely. Installation
 can be rerun to refresh the UI dependencies without duplicating the PATH entry.
 
 ### Updating
@@ -228,22 +229,30 @@ connect rechargeable Magic devices to this Mac by USB/Lightning for one minute,
 then unplug them. macOS may require pairing confirmation or a PIN.
 Bluetooth connection checks cannot prove that keys or gestures work.
 
-**Bluetooth permissions:** An interactive run requests native consent only when
-macOS reports that access has not been decided. Choose **Allow**; the tool waits
-up to 60 seconds before any device discovery or pairing. This does not scan,
-change Bluetooth power or remove pairings, and the wait does not consume a
-device's repair budget. `--demo` and `--help` do not request access. Noninteractive
-runs check authorization without opening a consent dialog.
+**Bluetooth permissions:** The tool reads authorization before device discovery
+or pairing. If permission is undecided, denied or restricted, interactive runs
+open **System Settings → Privacy & Security → Bluetooth** and stop safely.
+Noninteractive runs print instructions without opening settings. `--demo` and
+`--help` do not check Bluetooth access.
+
+Some terminal apps, including versions of WezTerm, lack the
+`NSBluetoothAlwaysUsageDescription` required for a native consent request.
+Creating a Bluetooth manager under that host can make macOS abort Python instead
+of displaying a dialog. The tool therefore only reads authorization; it never
+creates a Bluetooth manager to request permission. It does not modify or re-sign
+your terminal app. A reliable "Allow" dialog cannot be guaranteed in this CLI's
+execution context.
 
 If access was denied, enable the app hosting the command (e.g. WezTerm, Terminal,
 or the app containing an integrated terminal) in **System Settings → Privacy &
 Security → Bluetooth**, then quit and reopen that app. If it is missing, use
 the **+** button to add the app if your macOS version offers it. Consent belongs
 to the responsible application, so allowing one terminal does not necessarily
-allow another. The dashboard links to the settings pane and stops further
+allow another. The dashboard also links to the settings pane and stops further
 Bluetooth work rather than retrying a denied request. Corporate restrictions
 may require your administrator. The installer cannot grant permission itself;
-it sets up dependencies without requesting Bluetooth access. An abort with
+it sets up dependencies without requesting Bluetooth access. Reinstalling is
+not a remedy for missing authorization. An abort with
 code 134 may indicate denied API access, but is not proof of its cause.
 
 Exit status is `0` when all targets are connected, `1` for discovery or repair

@@ -131,6 +131,31 @@ class MagicRepairTests(unittest.TestCase):
         self.assertTrue(any(e['event'] == 'failure' and e['reason'] == 'bluetooth_access' for e in events))
         self.assertIn('Quit and reopen', result.stderr)
 
+    def test_permission_helper_abort_is_not_reported_as_missing_dependencies(self):
+        permission_python = self.root / 'data/shell-tools/magic-repair-ui/bin/python'
+        permission_python.parent.mkdir(parents=True)
+        for code in (134, 137):
+            with self.subTest(exit_status=code):
+                permission_python.write_text(f'#!/bin/bash\nexit {code}\n')
+                permission_python.chmod(0o755)
+                result = self.run_tool('--diagnose')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(self.mutations(), [])
+                self.assertIn('Privacy & Security > Bluetooth', result.stderr)
+                self.assertNotIn('refresh the dependencies', result.stderr)
+                events = self.diagnostic_events()
+                self.assertTrue(any(e['event'] == 'permission' and e['state'] == 'aborted' for e in events))
+
+    def test_undecided_permission_stops_before_discovery(self):
+        permission_python = self.root / 'data/shell-tools/magic-repair-ui/bin/python'
+        permission_python.parent.mkdir(parents=True)
+        permission_python.write_text('#!/bin/bash\nprintf "not_determined\\n"\n')
+        permission_python.chmod(0o755)
+        result = self.run_tool('--scan')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.calls(), [])
+        self.assertIn('If it is missing, use +', result.stderr)
+
     def test_api_abort_reports_access_failure_before_selection(self):
         self.data.update(fail='--paired', fail_code=134)
         self.save()
@@ -446,7 +471,7 @@ class MagicRepairTests(unittest.TestCase):
         self.data['hang'] = '--pair'
         self.save()
         result = self.run_tool('--timeout', '7')
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('Still pairing', result.stderr)
         self.assertIn('Ctrl-C cancels', result.stdout)
         self.assertNotIn('\x1b', result.stdout + result.stderr)

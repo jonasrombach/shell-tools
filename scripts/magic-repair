@@ -4,7 +4,7 @@
 set -o pipefail
 run_started=$SECONDS
 
-VERSION=3.0.1
+VERSION=3.0.2
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Terminals use the dashboard; redirected output stays append-only text.
 ui_python="${XDG_DATA_HOME:-$HOME/.local/share}/shell-tools/magic-repair-ui/bin/python"
@@ -50,6 +50,7 @@ device_deadline=0
 call_deadline=0
 global_failure=0
 failure_reason=
+settings_opened=0
 state_paired=false
 state_connected=false
 active_pid=
@@ -389,7 +390,8 @@ run_blueutil() {
                 134)
                     failure_reason=bluetooth_access
                     diagnostic_event failure --arg reason "$failure_reason" --arg message 'Bluetooth API aborted (134); access may be denied.'
-                    printf 'Bluetooth API aborted (134); access may be denied.\nEnable your terminal app in System Settings > Privacy & Security > Bluetooth.\nQuit and reopen that app, then run magic-repair again.\n' >&2 ;;
+                    printf 'Bluetooth API aborted (134); access may be denied.\n' >&2
+                    bluetooth_access_help ;;
                 69) printf 'Bluetooth or this operation is unavailable. Check Bluetooth settings and blueutil compatibility.\n' >&2 ;;
                 64) printf 'blueutil rejected the command. Check its version and supported options.\n' >&2 ;;
                 *) printf 'blueutil stopped with system/API error %s; stopping further repairs.\n' "$status" >&2 ;;
@@ -404,25 +406,41 @@ validate_devices() {
         (.address | test("^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$")) and
         (.name == null or (.name | type == "string")))' >/dev/null
 }
+bluetooth_access_help() {
+    failure_reason=bluetooth_access
+    # Opening Settings is safe; creating a CB manager to ask for consent may
+    # abort if the host app has no usage description. Never reset TCC decisions.
+    if [[ $settings_opened -eq 0 && -t 0 && ( -t 1 && -t 2 || -n ${MAGIC_REPAIR_UI_FD:-} ) ]]; then
+        settings_opened=1
+        /usr/bin/open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth' >/dev/null 2>&1 || :
+    fi
+    printf 'Enable the app hosting this terminal in System Settings > Privacy & Security > Bluetooth.\nIf it is missing, use + to add the app (e.g. WezTerm.app) if available.\nQuit and reopen the app, then run magic-repair again.\nManaged setting? Contact your administrator. Reinstalling does not grant Bluetooth access.\n' >&2
+}
 if [[ $diagnose -eq 1 ]]; then
     run_blueutil --version || fail 'Cannot read blueutil version for diagnostics'
 fi
-# CoreBluetooth can request consent gracefully, before IOBluetooth/blueutil aborts.
-# No prompting in redirected/noninteractive sessions. No persistent permission cache.
+# Read authorization before IOBluetooth/blueutil can abort. Never instantiate
+# CBCentralManager: terminals without a usage description can crash on consent.
 if [[ -x $ui_python ]]; then
-    permission_args=()
-    if [[ -t 0 && ( -t 1 && -t 2 || -n ${MAGIC_REPAIR_UI_FD:-} ) ]]; then permission_args+=(--request); fi
     diagnostic_event permission --arg state checking
-    "$ui_python" "$SCRIPT_DIR/lib/magic-repair/permissions.py" "${permission_args[@]}" > "$work_dir/permission" &
+    "$ui_python" "$SCRIPT_DIR/lib/magic-repair/permissions.py" > "$work_dir/permission" &
     active_pid=$!
-    if wait "$active_pid"; then permission_status=$(cat "$work_dir/permission"); else permission_status=unavailable; fi
+    permission_exit=0
+    wait "$active_pid" || permission_exit=$?
+    if [[ $permission_exit -eq 0 ]]; then
+        permission_status=$(cat "$work_dir/permission")
+    elif [[ $permission_exit -eq 134 || $permission_exit -eq 137 ]]; then
+        permission_status=aborted
+    else
+        permission_status=unavailable
+    fi
     active_pid=
-    diagnostic_event permission --arg state "$permission_status"
+    diagnostic_event permission --arg state "$permission_status" --argjson exit_status "$permission_exit"
     case $permission_status in
         allowed) ;;
-        denied|restricted|not_determined|timed_out)
-            failure_reason=bluetooth_access
-            printf 'Bluetooth authorization: %s.\nEnable your terminal app in System Settings > Privacy & Security > Bluetooth.\nIf the app is missing, add it using + if available. Quit and reopen the app, then rerun magic-repair.\nIf settings are managed by your organization, contact your administrator.\n' "$permission_status" >&2
+        denied|restricted|not_determined|aborted)
+            printf 'Bluetooth authorization: %s.\n' "$permission_status" >&2
+            bluetooth_access_help
             fail 'Bluetooth access is required before devices can be checked.' ;;
         *) fail 'Cannot check Bluetooth permission. Rerun ./install.sh to refresh the dependencies.' ;;
     esac

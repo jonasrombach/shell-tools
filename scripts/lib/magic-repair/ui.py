@@ -28,7 +28,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-VERSION = '3.0.1'
+VERSION = '3.0.2'
 BG = '#101827'
 CARD = '#162135'
 INK = '#edf2fb'
@@ -262,7 +262,7 @@ class Dashboard:
             ready = sum(d.status == 'ready' for d in self.devices.values())
             subtitle = f'{ready} of {len(self.devices)} devices connected · the rest can be retried'
         elif self.permission == 'checking':
-            title, subtitle = 'Allow Bluetooth access.', 'If macOS asks, choose Allow. We’ll continue automatically.'
+            title, subtitle = 'Checking Bluetooth access.', 'Checking permission for the app hosting this terminal.'
         elif self.scanning and not self.scan_finished:
             title, subtitle = 'Finding your devices.', 'Switch your Keyboard or Trackpad on now.'
         elif self.devices:
@@ -277,9 +277,9 @@ class Dashboard:
             cards = Panel(Group(
                 link,
                 text('System Settings → Privacy & Security → Bluetooth', MUTED),
-                text('1  Enable your terminal app (e.g. WezTerm).', INK),
+                text('1  Enable your terminal app; add it with + if missing.', INK),
                 text('2  Quit and reopen the app, then run magic-repair.', INK),
-                text('App missing? Add it with + if available. Managed setting? Contact your administrator.', MUTED),
+                text('Choose the host app (e.g. WezTerm.app). Managed setting? Contact your administrator.', MUTED),
             ), box=box.ROUNDED, border_style=AMBER, style=f'{INK} on {CARD}', padding=(1, 2))
         elif finished and not items:
             cards = text('No devices were checked.', MUTED)

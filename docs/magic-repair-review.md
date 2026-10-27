@@ -290,6 +290,10 @@ second physical Mac.
 
 ## Native Bluetooth consent (3.0.1)
 
+This approach was superseded by 3.0.2 after the user's fresh-access test exposed
+an uncatchable TCC abort. The description below records the initial approach,
+not the current behavior.
+
 A fresh installation succeeded but blueutil aborted with 134 before discovery
 in the user's terminal. blueutil documents this as a possible Bluetooth API
 access failure, not a definitive permission result. The previous final dashboard
@@ -325,3 +329,34 @@ check verified exit 1, lock cleanup and no device-state writes. The native bridg
 reported allowed in the agent's existing execution context. A fresh user consent
 dialog in WezTerm still needs live confirmation; no privacy permissions were reset
 for automated testing.
+
+## Safe authorization check (3.0.2)
+
+The user's 3.0.1 screenshot shows the Python permission helper aborting after
+announcing a native dialog. The screenshot alone does not contain the TCC crash
+reason, but it matches the documented missing-usage-description failure. The
+locally installed WezTerm Info.plist also has no
+`NSBluetoothAlwaysUsageDescription`, and the Homebrew Python app bundle has none.
+
+[Apple requires the usage description](https://developer.apple.com/documentation/bundleresources/information-property-list/nsbluetoothalwaysusagedescription).
+[Bleak's troubleshooting guide](https://bleak.readthedocs.io/en/stable/troubleshooting.html)
+documents this precise macOS SIGABRT and recommends manually adding the host app
+to Bluetooth privacy settings. Its [maintainer's diagnosis](https://github.com/hbldh/bleak/issues/761)
+identifies the responsible terminal's missing description as the cause in that
+case. An already-allowed development host did not exercise that first-request
+failure; authorization-state mocks were insufficient to validate a native dialog.
+
+The helper now only reads `CBManager.authorization`, which Apple documents as
+safe to check before manager creation. It never constructs `CBCentralManager`
+or requests consent. Interactive runs without authorization open the Bluetooth
+privacy pane and explain enabling/adding the terminal and restarting it. Other
+runs print the same instructions without launching Settings. No extra app,
+terminal plist edits, re-signing, TCC resets or controller changes are introduced.
+Unexpected helper aborts (134/137) also get access guidance rather than the
+incorrect instruction to reinstall dependencies. This keeps the workaround
+within the user's constraints; a native Allow dialog is no longer promised.
+
+Regression checks cover every authorization state without manager construction,
+undecided access stopping before inquiry, helper-abort classification, and normal
+allowed execution. The actual native status query and read-only dry run are
+checked without resetting permissions or altering real device pairing.
